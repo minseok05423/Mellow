@@ -6,6 +6,7 @@ server-side, keyed by the problem. Hint, Answer and Explain all build on that on
 reaches the browser when the student asks for Answer or Explain.
 """
 import hashlib
+import threading
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -34,6 +35,7 @@ class ProofStep(BaseModel):
                                        "empty if none")
     algebra: Literal["none", "identity", "derived"] = Field(
         "none", description="identity: true for all values; derived: follows from earlier claims by algebra alone")
+    uses: list[int] = Field(default_factory=list, description="derived only: the earlier step numbers it follows from")
     why: str = Field(description="one sentence: why this step holds")
     checked: bool = Field(False, description="always false; the server sets it")
 
@@ -49,8 +51,10 @@ are given, as a list of short steps in order (at most 12). For each step:
 - algebra, one of:
   - "identity": the claim is an equation true for all values of its variables (expanding, factoring,
     simplifying), like $(a+b)^2 = a^2+2ab+b^2$.
-  - "derived": the claim follows from the earlier claims by algebra alone (rearranging, or substituting an
-    earlier claim of the form "x = ..."), like $4k^2 = 2q^2$ from $p^2 = 2q^2$ and $p = 2k$.
+  - "derived": the claim follows from earlier claims by algebra alone (rearranging, or substituting an
+    earlier claim of the form "x = ..."), like $4k^2 = 2q^2$ from $p^2 = 2q^2$ and $p = 2k$. Put the step
+    numbers it follows from in `uses` (here the steps stating $p^2 = 2q^2$ and $p = 2k$). In a proof by
+    cases, cite only steps from the same case.
   - "none": anything else: new definitions (like $p = 2k$ from "p is even"), assumptions, inequalities, and
     anything that needs a theorem, parity, divisibility or a limit argument.
 - why: one sentence on why the step holds.
@@ -62,7 +66,7 @@ Use results a first-year course would know, and name each theorem you use and ch
 def _verify(p: Proof) -> list[str]:
     """SymPy checks each identity on its own and each derived claim against the claims before it.
     Sets `checked`; a refuted claim is an error, which goes back to the model."""
-    errors, claims = [], []
+    errors, claims = [], {}  # step number -> its claim
     for i, s in enumerate(p.steps, 1):
         s.checked = False
         if s.claim and s.algebra == "identity" and s.claim.count("=") == 1:
@@ -73,28 +77,57 @@ def _verify(p: Proof) -> list[str]:
                               f"the left side is ${r.values['before']}$, the right side ${r.values['after']}$); "
                               "fix it, or mark it derived if it follows from earlier claims")
             s.checked = r.verdict == "verified"
-        elif s.claim and s.algebra == "derived" and claims:
-            r = check_step(s.claim, claims)
+        elif s.claim and s.algebra == "derived" and (cited := [claims[j] for j in sorted(set(s.uses))
+                                                              if j in claims and j < i]):
+            # Only the cited steps: in a proof by cases, the nearest earlier claim can be from another case.
+            r = check_step(s.claim, cited)
             if r.verdict == "refuted":
                 errors.append(f"step {i}: ${s.claim}$ does not follow from ${r.compared_with}$ "
-                              f"(at ${assignment(r.counterexample)}$ they differ); fix the algebra")
+                              f"(at ${assignment(r.counterexample)}$ they differ); fix the algebra, cite the "
+                              "right steps in `uses`, or mark it none if it needs more than algebra")
             # trivial_after: the claim holds for all values on its own, so it's true whatever came before
             s.checked = r.verdict == "verified" or r.reason == "trivial_after"
         if s.claim:
-            claims.append(s.claim)
+            claims[i] = s.claim
     return errors
 
 
-def solve(problem: str, definitions: list[str], user: str, model: str) -> Proof:
-    text = f"Problem:\n{problem}"
-    if definitions:
-        text += "\n\nDefinitions the student wrote earlier:\n" + "\n".join(definitions)
-    return llm.structured_call(
-        endpoint="solve", user=user, cost_class="reason", model=model, system=SOLVE_SYSTEM,
-        content=[{"type": "text", "text": text}], schema=Proof, semantic_check=_verify,
-        cache_input={"problem": problem, "definitions": definitions, "prompt": _id(SOLVE_SYSTEM)},
-        effort="high", max_tokens=8192,
-    )
+# One solve per problem at a time: a Hint pressed while the background solve runs waits for it, then
+# reads the cache, instead of paying for a second solve.
+# shortcut: in-process locks, so this holds for one server process. Upgrade path: a lock row in the DB.
+_solving: dict[tuple, threading.Lock] = {}
+_solving_guard = threading.Lock()
+
+
+def solve(problem: str, user: str, model: str, cost_class: str = "reason") -> Proof:
+    """The problem alone is the key (not the page's definitions), so the background solve and every
+    action on that problem share one cached proof."""
+    with _solving_guard:
+        lock = _solving.setdefault((problem, model), threading.Lock())
+    with lock:
+        return llm.structured_call(
+            endpoint="solve", user=user, cost_class=cost_class, model=model, system=SOLVE_SYSTEM,
+            content=[{"type": "text", "text": f"Problem:\n{problem}"}], schema=Proof, semantic_check=_verify,
+            # DeepSeek counts thinking against max_tokens; a 12-step proof by cases hit 8192 and was cut off.
+            cache_input={"problem": problem, "prompt": _id(SOLVE_SYSTEM)}, effort="high", max_tokens=16384,
+        )
+
+
+class PresolveRequest(BaseModel):
+    problem: str = Field(min_length=1, max_length=4000)  # a problem the page labels found (not yet confirmed)
+    reasoning_model: str | None = None
+
+
+def presolve(req: PresolveRequest, user: str) -> None:
+    """Solve in the background so the first Hint / Answer / Explain on a problem is fast. Nothing is shown
+    to the student, so an unconfirmed reading is fine; a different confirmed text just solves again."""
+    model = req.reasoning_model or config.REASONING_MODEL
+    if not config.llm_configured(model):
+        return
+    try:
+        solve(req.problem, user, model, cost_class="presolve")
+    except (llm.LLMError, llm.QuotaExceeded):
+        pass  # the action solves (or falls back) when pressed; the attempt is in the request log
 
 
 def format_proof(p: Proof, *, why: bool, footnote: bool = True) -> str:
@@ -183,7 +216,7 @@ def assist(req: AssistRequest, user: str) -> CheckResponse:
     proof = None
     if problem and req.kind != "concept":
         try:
-            proof = solve(problem, req.definitions, user, model)
+            proof = solve(problem, user, model)
         except llm.LLMError:
             proof = None  # Hint falls back to a question with no answer behind it; Answer/Explain say so
 

@@ -2,11 +2,11 @@
 import re
 import time
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import BackgroundTasks, FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
 from . import catalog, config, llm, recognize, store, structure
-from .assist import AssistRequest, assist
+from .assist import AssistRequest, PresolveRequest, assist, presolve
 from .check import CheckRequest, CheckResponse, check
 
 app = FastAPI(title="Mellow")
@@ -100,6 +100,16 @@ def assist_route(req: AssistRequest, x_mellow_user: str | None = Header(None)):
               request=req.model_dump(), response=res.model_dump(), valid=1, retries=0, cached=0,
               latency_ms=int((time.time() - t) * 1000))
     return res
+
+
+@app.post("/presolve", status_code=202)
+def presolve_route(req: PresolveRequest, tasks: BackgroundTasks, x_mellow_user: str | None = Header(None)):
+    """Start solving a problem the page labels found; returns at once (the solve is logged by structured_call)."""
+    user = user_id(x_mellow_user)
+    if req.reasoning_model and not catalog.model_available(req.reasoning_model):
+        raise HTTPException(400, f"reasoning model {req.reasoning_model!r} isn't available")
+    tasks.add_task(presolve, req, user)
+    return {"queued": True}
 
 
 class SceneRequest(BaseModel):

@@ -31,6 +31,7 @@ import {
   Catalog, Choices, ModelOption, catalog, choices, loadModels, setChoice,
 } from './models';
 import { showReadings, startLiveReading } from './readings';
+import { startLabelling } from './structure';
 import { LassoOverlayUtil, LassoSelectTool } from './lasso';
 import { NotebookMeta, persistenceKey, updateNotebook } from './library';
 import { PAPERS, PageShapeUtil, Paper, addPage, getPageInView, installPages, setPaper } from './pages';
@@ -230,6 +231,7 @@ export function Notebook({ nb }: { nb: NotebookMeta }) {
           const stopPages = installPages(editor);
           const stopInk = recordInk(editor);
           const stopReading = startLiveReading(editor);
+          const stopLabelling = startLabelling(editor);
           // Bump the library's "last edited" time, at most every few seconds.
           let last = 0;
           const stopListen = editor.store.listen(() => {
@@ -238,7 +240,7 @@ export function Notebook({ nb }: { nb: NotebookMeta }) {
             updateNotebook(nb.id, { updatedAt: last });
           }, { source: 'user', scope: 'document' });
           if (import.meta.env.DEV) (window as unknown as { editor: typeof editor }).editor = editor;
-          return () => { stopPages(); stopInk(); stopReading(); stopListen(); };
+          return () => { stopPages(); stopInk(); stopReading(); stopLabelling(); stopListen(); };
         }}
       />
     </div>

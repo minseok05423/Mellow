@@ -59,13 +59,28 @@ def _normalize(latex: str) -> str:
     return s.strip()
 
 
+FUNCTION_NAMES = {"f", "g", "h", "F", "G", "H"}  # letters students use for functions: f(x) stays a function
+
+
+def _implicit_products(e):
+    """parse_latex reads n(n+1) as a function n applied to n+1; a student means the product.
+    shortcut: only f, g, h (and capitals) are functions, so a student's own p(x) reads as p*x. Upgrade
+    path: take function names from the page's definitions ("let p be a polynomial")."""
+    from sympy import Symbol
+    from sympy.core.function import AppliedUndef
+
+    return e.replace(
+        lambda x: isinstance(x, AppliedUndef) and x.func.__name__ not in FUNCTION_NAMES and len(x.args) == 1,
+        lambda x: Symbol(x.func.__name__) * x.args[0])
+
+
 def _parse(latex: str):
     from sympy.parsing.latex import parse_latex
 
     s = _normalize(latex)
     if s.count("=") > 1:
         raise ValueError("chained equalities")
-    return parse_latex(s)
+    return _implicit_products(parse_latex(s))
 
 
 def _is_eq(e) -> bool:
@@ -172,6 +187,7 @@ def _check(current: str, context: list[str]) -> CheckResult:
     # Lines like "p = 2k" in the context are substitutions; the step is checked against the
     # nearest earlier line that isn't one.
     subs: dict = {}
+    sub_line = None  # the nearest substitution line, named in feedback
     target, target_line = None, None
     for line in reversed(context):
         if is_prose(line):
@@ -182,10 +198,19 @@ def _check(current: str, context: list[str]) -> CheckResult:
             continue
         if _is_eq(e) and isinstance(e.lhs, Symbol) and e.lhs not in e.rhs.free_symbols and target is None:
             subs.setdefault(e.lhs, e.rhs)
+            sub_line = sub_line or line
             continue
         target, target_line = e, line
         break
     if target is None:
+        if subs and _is_eq(after) and not cont and after.free_symbols & set(subs):
+            # "p = 2k" above, "p^2 = 4k^2" here: true for all values once p is replaced. Only ever a
+            # "verified": if it isn't an identity, the step may rest on a hypothesis written in words
+            # ("p^2 = 2q^2" stated in prose, then restated), so a counterexample here could be false.
+            from sympy import simplify
+
+            if simplify((after.lhs - after.rhs).subs(subs)) == 0:
+                return CheckResult("verified", "substitution_equal", compared_with=sub_line)
         return CheckResult("unverified", "no_previous_line")
 
     before = target.subs(subs) if subs else target

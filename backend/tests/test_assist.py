@@ -34,7 +34,7 @@ class Fake:
 
 def proof(*claims):
     """A proof whose steps state these claims; the first is a starting point, the rest are derived from it."""
-    return Proof(steps=[ProofStep(text=f"so ${c}$", claim=c, algebra="derived" if i else "none", why="algebra")
+    return Proof(steps=[ProofStep(text=f"so ${c}$", claim=c, algebra="derived" if i else "none", uses=[i], why="algebra")
                         for i, c in enumerate(claims)])
 
 
@@ -98,7 +98,7 @@ def test_a_wrong_algebra_claim_is_caught_by_sympy_and_retried(key):
 def test_new_definitions_are_not_algebra_and_never_refuted(key):
     p = Proof(steps=[ProofStep(text="$p^2 = 2q^2$", claim="p^2=2q^2", why="squaring"),
                      ProofStep(text="$p$ is even, so $p = 2k$", claim="p=2k", why="parity"),
-                     ProofStep(text="$4k^2 = 2q^2$", claim="4k^2=2q^2", algebra="derived", why="substitute")])
+                     ProofStep(text="$4k^2 = 2q^2$", claim="4k^2=2q^2", algebra="derived", uses=[1, 2], why="substitute")])
     llm.set_provider(Fake(Proof=[p]))
     d = assist("explain", kind="problem", selection=r"\text{Prove } \sqrt{2} \text{ is irrational}").json()
     assert d["verdict"] == "explain" and "$p = 2k$\n" in d["message"] and "4k^2 = 2q^2$ ✓" in d["message"]
@@ -114,6 +114,19 @@ def test_identities_are_checked_on_their_own_and_a_false_one_goes_back(key):
     d = assist("answer", kind="problem", selection=r"\text{Expand } (a+b)^3").json()
     assert "isn't true for all values" in fake.calls[1][2][-1]["content"]
     assert d["message"].count("✓") == 3  # both steps, plus the footnote
+
+
+def test_a_case_split_is_checked_case_by_case_not_refuted_across_cases(key):
+    # The real DeepSeek proof that n^2+n is even: checking case 2 against case 1 gave a bogus counterexample.
+    p = Proof(steps=[ProofStep(text="", claim="n=2k", why="case 1"),
+                     ProofStep(text="", claim="n^2+n=2(2k^2+k)", algebra="derived", uses=[1], why="substitute"),
+                     ProofStep(text="", claim="n=2m+1", why="case 2"),
+                     ProofStep(text="", claim="n^2+n=2(2m^2+3m+1)", algebra="derived", uses=[3], why="substitute"),
+                     ProofStep(text="", claim="n^2+n=n(n+1)", algebra="identity", why="factor")])
+    fake = Fake(Proof=[p])
+    llm.set_provider(fake)
+    d = assist("answer", kind="problem", selection=r"\text{Show } n^2+n \text{ is even}").json()
+    assert len(fake.calls) == 1 and d["message"].count("✓") == 4  # 3 steps + footnote; n(n+1) is a product
 
 
 def test_without_a_checked_proof_hint_still_asks_and_answer_says_so(key):
@@ -157,3 +170,34 @@ def test_structure_labels_every_line_and_retries_a_bad_labelling(key):
 
 def test_structure_needs_a_model():
     assert client.post("/structure", headers=H, json={"lines": [PROBLEM]}).status_code == 503
+
+
+def test_presolve_fills_the_cache_so_the_first_hint_skips_the_solve(key):
+    fake = Fake(Proof=[GOOD], Reply=[Reply(text="What do you get when you multiply out?")])
+    llm.set_provider(fake)
+    r = client.post("/presolve", headers=H, json={"problem": PROBLEM})  # TestClient runs background tasks
+    assert r.status_code == 202 and [c[0] for c in fake.calls] == ["Proof"]
+    assist("hint", problem=PROBLEM)
+    assert [c[0] for c in fake.calls] == ["Proof", "Reply"]
+
+
+def test_concurrent_solves_of_one_problem_share_one_call(key):
+    import threading, time
+    from app.assist import solve
+
+    class Slow(Fake):
+        def complete(self, **kw):
+            time.sleep(0.3)
+            return super().complete(**kw)
+    fake = Slow(Proof=[GOOD, GOOD])
+    llm.set_provider(fake)
+    threads = [threading.Thread(target=solve, args=(PROBLEM, "u-123456", config.REASONING_MODEL)) for _ in range(2)]
+    [t.start() for t in threads]
+    [t.join() for t in threads]
+    assert len(fake.calls) == 1
+
+
+def test_presolve_failures_are_silent(key):
+    bad = proof("(a+b)^2", "a^2+b^2")
+    llm.set_provider(Fake(Proof=[bad, bad]))
+    assert client.post("/presolve", headers=H, json={"problem": PROBLEM}).status_code == 202

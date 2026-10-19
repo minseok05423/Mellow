@@ -2,15 +2,16 @@
 // -> confirm chip (readings, what the selection is, its problem) -> /check or /assist -> feedback card.
 
 import katex from 'katex';
-import { useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { EditorPortal, useEditor, useValue } from 'tldraw';
 import { api, type CheckResult, type Kind } from './api';
-import { addFeedback } from './feedback';
+import { MathText, addFeedback, lineText } from './feedback';
 import { Box } from 'tldraw';
 import { Line, getLines, linesAbove, linesForStrokes } from './lines';
 import { LineReading, getReadings, looksLikeWords, readingStatus, setReading, showReadings } from './readings';
 import { selectedInkShapes } from './samples';
-import { ActionContext, actionContext, ensureStructure } from './structure';
+import { getPages } from './pages';
+import { ActionContext, actionContext, ensureStructure, joinReadings } from './structure';
 
 function Tex({ latex, className }: { latex: string; className?: string }) {
   return (
@@ -70,7 +71,8 @@ function ReadingRow({ label, value, onChange, startEditing, placeholder = 'Type 
         </div>
       ) : (
         <div className="chip-read">
-          <Tex latex={value} />
+          {/* Words as plain text so a long reading wraps; lines of a multi-line problem get a space between. */}
+          <MathText text={lineText(value.replace(/\n/g, ' \\text{ } '))} />
           <button className="chip-pen" title="Fix the reading" onClick={() => setEditing(true)}>✎</button>
         </div>
       )}
@@ -137,6 +139,25 @@ export function CheckUI() {
   const [chip, setChip] = useState<ChipState | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [seconds, setSeconds] = useState(0);
+  const chipRef = useRef<HTMLDivElement>(null);
+
+  // A live count while the model works: the first answer on a problem can take a minute.
+  // shortcut: elapsed time only. Upgrade path: stream progress into the card (P3b).
+  useEffect(() => {
+    if (!busy) return;
+    setSeconds(0);
+    const t = setInterval(() => setSeconds((s) => s + 1), 1000);
+    return () => clearInterval(t);
+  }, [busy]);
+
+  // Keep the chip on screen: lift it when it would run off the bottom (it grows as rows load).
+  useLayoutEffect(() => {
+    const el = chipRef.current;
+    if (!el) return;
+    const over = el.getBoundingClientRect().bottom - (window.innerHeight - 8);
+    if (over > 0) el.style.top = `${Math.max(8, el.offsetTop - over)}px`;
+  });
 
   // Show the buttons only when the selection is handwriting and nothing is being dragged.
   const target = useValue('check target', () => {
@@ -155,11 +176,12 @@ export function CheckUI() {
     setChip({ action, lines: sel, texts: sel.map((l) => readings[l.key]?.latex ?? ''), above,
       previous: above ? readings[above.key]?.latex ?? '' : '', labelling: true, ctx: null, kind: 'steps',
       problem: '', problemRead: '' });
-    // Label the page while the student looks over the readings.
-    ensureStructure(editor, sel[0].pageId).then((s) => {
-      const ctx = actionContext(editor, s, sel);
-      const r = getReadings(editor);
-      const problem = ctx.problem.map((l) => r[l.key]?.latex ?? '').filter(Boolean).join(' ');
+    // Labels for this page and the one before (usually already there from the pause after writing).
+    const pages = getPages(editor).map((p) => p.id);
+    const prev = pages[pages.indexOf(sel[0].pageId) - 1];
+    Promise.all([ensureStructure(editor, sel[0].pageId), prev ? ensureStructure(editor, prev) : null]).then((ss) => {
+      const ctx = actionContext(editor, ss, sel);
+      const problem = joinReadings(editor, ctx.problem);
       setChip((c) => (c?.lines === sel ? { ...c, labelling: false, ctx, kind: ctx.kind, problem, problemRead: problem } : c));
     });
   }
@@ -236,7 +258,7 @@ export function CheckUI() {
         </div>
       )}
       {chip && (
-        <div className="chip" style={{ left: Math.max(8, (target?.x ?? 200) - 120), top: (target?.y ?? 80) + 32 }}
+        <div className="chip" ref={chipRef} style={{ left: Math.max(8, (target?.x ?? 200) - 120), top: (target?.y ?? 80) + 32 }}
           onPointerDown={(e) => e.stopPropagation()}>
           {chip.lines.some((l) => status[l.key] === 'reading') && <div className="chip-note">Still reading…</div>}
           {chip.lines.map((l, i) => (
@@ -264,6 +286,9 @@ export function CheckUI() {
               startEditing={!chip.previous} onChange={(v) => setChip({ ...chip, previous: v })} />
           )}
           {error && <div className="chip-error">{error}</div>}
+          {busy && chip.action !== 'check' && (
+            <div className="chip-note">Thinking… {seconds} s{seconds >= 5 ? ' · the first answer on a problem can take a minute' : ''}</div>
+          )}
           <div className="chip-actions">
             <button onClick={() => setChip(null)}>Cancel</button>
             <button className="primary" disabled={busy || chip.labelling || !chip.texts.some((t) => t.trim())}

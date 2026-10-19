@@ -84,8 +84,9 @@ behind it, and Answer / Explain say so.
 **Document structure (DECISIONS #21):** on top of the readings, each line gets a
 role (problem | definition | claim | proof step | algebra | concept | note) and
 lines are grouped into segments with a one-line description ("Problem 3: prove √2
-is irrational"). A cheap model labels the page in one call when an action is
-pressed (cached until the page's readings change). Context for an action is found by structure: the segment's problem, its
+is irrational"). A cheap model labels the page in one call when the student
+pauses (cached until the page's readings change), and any problem it finds
+starts solving in the background (DECISIONS #22). Context for an action is found by structure: the segment's problem, its
 steps so far, and definitions written earlier on the page. The problem an action
 is built from is shown in the confirm box, so a wrong label is fixed before
 anything is judged. Retrieval (RAG) over course material waits for P5's PDFs.

@@ -108,9 +108,11 @@ These are kept even in "minimal" mode:
     a concept) and, for steps, **the problem they work on**. Both come from the page's labels
     and can be changed. Check also shows the line above.
   - Only confirmed readings are ever judged.
-- **Page labels:** when an action is pressed, a cheap model labels every line on the page
+- **Page labels:** after you pause writing, a cheap model labels every line on the page
   (problem, definition, claim, proof step, algebra, concept, note) and groups lines into
-  described segments. They're kept with the notebook until the page's readings change.
+  described segments. They're kept with the notebook until the page's readings change. Any
+  problem found starts solving in the background, so Hint/Answer/Explain on it are usually
+  instant. A step on a new page finds its problem on the page before.
 - **Check gives one card.**
   - On a problem or a concept: "nothing to check", with no request.
   - If the selection contains words, all its lines are treated as one block, and the reasoning
@@ -135,7 +137,8 @@ These are kept even in "minimal" mode:
 - **Solve once (Hint / Answer / Explain on a problem):** the model writes the proof as steps,
   each algebra claim tagged identity or derived and checked by SymPy; a counterexample goes back
   to the model for one retry. The checked proof is cached on the server, keyed by the problem, so
-  only the first press is slow (20–70 s with DeepSeek V4 Pro at high effort). Hints use it as a
+  only the first solve is slow (20–70 s with DeepSeek V4 Pro at high effort), and it usually
+  runs in the background before any button is pressed. Hints use it as a
   hidden reference and follow the student's own route; it reaches the browser only through
   Answer or Explain. If no proof passes, Hint asks without one, and Answer/Explain say so.
 - **Copy and paste:**
@@ -209,7 +212,8 @@ then, therefore, and, i.e., which, gives, implies), or a run of 3+ letters.
 ### The LLM layer (`backend/app/llm.py`)
 Every LLM call goes through `structured_call`, in this order:
 1. Check the cache.
-2. Check the daily quota (per user: 3000 stroke readings, 200 LLM readings, 50 reasoning calls).
+2. Check the daily quota (per user: 3000 stroke readings, 200 LLM readings, 50 reasoning calls,
+   500 page labellings, 30 background solves).
 3. Call the model, streaming.
 4. Validate the output against its Pydantic schema, plus semantic checks.
 5. If invalid, retry once, showing the model its error.
@@ -289,7 +293,7 @@ backend/           FastAPI + Pydantic + SymPy + SQLite
     catalog.py      model catalog with prices
     store.py        SQLite: request log, cache, quotas
   bakeoff/run.py    recognizer bake-off over recorded samples
-  tests/            pytest suite (71 tests)
+  tests/            pytest suite (77 tests)
 ```
 
 ---
@@ -322,7 +326,7 @@ and word lines get "Noted".
 
 **Tests:**
 ```bash
-cd backend && .venv/bin/python -m pytest -q                       # 71 pass, never call real APIs
+cd backend && .venv/bin/python -m pytest -q                       # 77 pass, never call real APIs
 python3 -m venv ~/.venvs/mellow-tests                             # one-time Playwright setup
 ~/.venvs/mellow-tests/bin/pip install -r frontend/tests/requirements.txt
 ~/.venvs/mellow-tests/bin/playwright install chromium
@@ -373,6 +377,7 @@ cd backend && .venv/bin/python -m bakeoff.run ~/Downloads/mellow-samples-*.json
 20. **A problem is solved once,** its algebra checked by SymPy (identities on their own, derived
     claims against earlier ones), and reused by Hint, Answer and Explain. Lean left out for now.
 21. **Lines get roles and segments;** context is found by structure, not RAG (RAG waits for P5).
+22. **Problems are solved in the background** once the page labels find them (own cap: 30/day).
 
 ---
 
@@ -392,10 +397,12 @@ These are marked `shortcut:` in the code.
 - **Unverified logic:** SymPy checks only the algebra in a proof; logic steps (quantifiers,
   cases, named theorems) are marked by having no ✓. The AI's Check and Answer on steps can be
   wrong. Tuning belongs in the planned reasoning test.
-- **Labels per page, on demand:** a proof continued on the next page doesn't find its problem
-  (type it in the confirm box). Upgrade path: label on pause, across pages.
-- **First solve is slow:** 20–70 s. Upgrade path: solve in the background once a problem is
-  labelled, or stream progress.
+- **Solves are slow (20–70 s), hidden by solving in the background** once the page is labelled
+  after a pause. Pressing an action right after writing still waits (with a seconds counter).
+  Upgrade path: stream progress into the card (P3b).
+- **Problem lookup goes back one page.** Older problems: type them in the confirm box.
+- **Function names:** only f, g, h (and F, G, H) are read as functions; any other letter before
+  brackets, like n(n+1), is a product.
 
 **Accounts and identity:**
 - An **anonymous per-browser id** stands in for accounts until P4.

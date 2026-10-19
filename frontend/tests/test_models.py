@@ -27,6 +27,9 @@ with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)
     page = browser.new_page(viewport={"width": 1280, "height": 900})
     page.route("**/api/recognize", capture)
+    # Page labelling and background solving would call real models; this test is about the Models menu.
+    page.route("**/api/structure", lambda r: r.fulfill(status=503, json={"detail": "faked off"}))
+    page.route("**/api/presolve", lambda r: r.fulfill(status=202, json={"queued": True}))
     page.goto("http://localhost:5173/")
     page.wait_for_load_state("networkidle")
     page.click("text=+ New notebook")

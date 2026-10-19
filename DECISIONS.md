@@ -173,7 +173,8 @@ Hints written without a solution are blind: the model asks about the "weakest po
 without knowing where the proof goes. So the reasoning model first writes the proof as
 structured steps (prose plus the LaTeX claim, if any, tagged identity, derived or none).
 SymPy checks an identity on its own (left side against right side, for all values) and a
-derived claim against the earlier claims; untagged claims (new definitions like p = 2k)
+derived claim against the earlier steps it cites (only those: in a proof by cases the
+nearest earlier claim can belong to the other case, which gave a real false counterexample); untagged claims (new definitions like p = 2k)
 are never checked, since they don't follow by algebra. The first real test showed why the
 tag is needed: a proof made only of identities had nothing checked when each claim was
 compared with the one before it. A counterexample goes back to the model for one retry, and an
@@ -189,8 +190,8 @@ often doesn't compile, and running it needs a sandboxed service.
 
 Each line's reading gains a role (problem, definition, claim, proof step, algebra,
 concept, note), and lines are grouped into segments with a one-line description. A cheap
-model labels the whole page in one call when an action is pressed, while the student looks
-over the confirm box; labels are stored per page with the readings they were made from, so
+model labels the whole page in one call once its lines are read and the student pauses
+(and again when an action is pressed, if anything changed); labels are stored per page with the readings they were made from, so
 any edit means a relabel (cached server-side by text). The confirm box shows what the
 selection is and its problem, and the student can change both. Context lines (work,
 definitions) may be unconfirmed readings for Hint and Explain, but an Answer, which is a
@@ -200,3 +201,16 @@ above". RAG is deferred: a notebook's text fits in the prompt, structure finds t
 lines exactly where embedding search is fuzzy, and the model already knows intro proofs.
 It pays off for course-specific material (lecture notes, numbered lemmas), which arrives
 with PDF import in P5.
+
+## 22. Problems are solved in the background as soon as the page labels find them
+
+The first real solves took 20-70 s (DeepSeek V4 Pro, high effort), and a student who
+presses Hint shouldn't wait that long. So once a page is read and the student pauses, it is
+labelled, and each run of problem lines is sent to /presolve, which solves it in the
+background and caches the checked proof. The solve is keyed by the problem text alone (not
+the page's definitions), joined the same way the actions join it, so a later Hint, Answer or
+Explain finds it. A press during a running solve waits for it instead of paying for a second
+one (an in-process lock per problem). Presolving uses unconfirmed readings, which is fine
+because nothing is shown; a corrected problem just solves again. It has its own daily cap
+(30) so background work can't use up the student's 50 reasoning calls. The cost is one solve
+per problem written, even if no button is pressed: about a cent each at DeepSeek's prices.

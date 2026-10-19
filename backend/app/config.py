@@ -37,6 +37,7 @@ CAPS = {
     "read_llm": int(env("CAP_READ_LLM", "200")),
     "reason": int(env("CAP_REASON", "50")),
     "structure": int(env("CAP_STRUCTURE", "500")),  # page labelling (DECISIONS #21), cheap model
+    "presolve": int(env("CAP_PRESOLVE", "30")),  # background solves of problems found on the page (DECISIONS #22)
 }
 
 

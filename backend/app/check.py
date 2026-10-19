@@ -100,7 +100,9 @@ def check(req: CheckRequest, user: str) -> CheckResponse:
             return judge_steps(req, user, model)
         return CheckResponse(verdict="noted", reason="prose", message=NOTED)  # no reasoning model available
     r = check_step(req.current, req.context)
-    if r.verdict == "verified":
+    if r.verdict == "verified" and r.reason == "substitution_equal":
+        msg = f"This follows by substituting ${r.compared_with}$."
+    elif r.verdict == "verified":
         msg = "This follows from the line above."
     elif r.verdict == "refuted" and r.reason == "rewrite_differs":
         msg = (f"Try ${assignment(r.counterexample)}$: the line above gives ${r.values['before']}$, "

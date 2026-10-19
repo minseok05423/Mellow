@@ -57,3 +57,19 @@ def test_counterexample_is_concrete_and_small():
 def test_timeout_is_unverified():
     r = check_step("a^2+b^2", ["(a+b)^2"], timeout=0.0001)
     assert r.verdict == "unverified" and r.reason == "timeout"
+
+
+def test_a_letter_before_brackets_is_a_product_but_f_stays_a_function():
+    assert check_step("n(n+1)", ["n^2+n"]).verdict == "verified"
+    assert check_step("= a(b+c)", ["ab+ac"]).verdict == "verified"
+    r = check_step("f(c) = c", ["f(c) = 2c"])
+    assert r.verdict != "verified"  # f(c) is a function value, not f*c
+
+
+def test_a_step_that_only_substitutes_is_checked_on_its_own():
+    r = check_step("p^2 = 4k^2", ["p = 2k"])
+    assert (r.verdict, r.reason, r.compared_with) == ("verified", "substitution_equal", "p = 2k")
+    # Never a refutation from substitutions alone: a new definition, or a hypothesis written in words above.
+    assert check_step("q = 2l", ["p = 2k"]).verdict == "unverified"
+    assert check_step("p^2 = 2q^2", ["p = 2k"]).verdict == "unverified"
+    assert check_step("y = 5", ["x = 3"]).verdict == "unverified"

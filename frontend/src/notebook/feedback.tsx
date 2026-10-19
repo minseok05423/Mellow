@@ -34,8 +34,12 @@ export function MathText({ text, className }: { text: string; className?: string
   return <span className={className} dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
-/** A reading as MathText: `\text{...}` becomes plain text so a long statement wraps instead of clipping. */
-const lineText = (latex: string) => `$${latex.replace(/\\text\s*\{([^}]*)\}/g, '$$$1$$')}$`;
+/** A reading as MathText: `\text{...}` becomes plain text so a long statement wraps instead of clipping.
+ * split() with a capture group alternates math, text, math, ...; blank math stays out (no empty `$$`). */
+export const lineText = (latex: string) => latex
+  .split(/\\text\s*\{([^}]*)\}/)
+  .map((part, i) => (i % 2 || !part.trim() ? part : `$${part}$`))
+  .join('');
 
 const cardText = (shape: FeedbackShape) =>
   `${TITLE[shape.props.verdict]}: ${shape.props.line}\n${shape.props.message}`;

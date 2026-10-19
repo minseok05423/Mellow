@@ -58,7 +58,7 @@ def fake_recognize(route):
 
 
 # Word lines go to the reasoning model; fake it here (algebra still goes to the real SymPy backend).
-check_calls, assist_calls, structure_calls = [], [], []
+check_calls, assist_calls, structure_calls, presolve_calls = [], [], [], []
 QUESTION = "Which theorem gets you from here to $f(c)=c$?"
 JUDGEMENT = "Gap: you use the IVT on $g$ without saying why $g$ is continuous."
 ANSWER = "1. Let $g(x) = f(x) - x$. ✓\n2. By the IVT, $g$ has a root $c$.\n✓ = algebra checked by SymPy."
@@ -92,6 +92,19 @@ def fake_structure(route):
     route.fulfill(json={"lines": [{"role": role(l), "segment": 0} for l in lines], "segments": ["Problem: a fixed point"]})
 
 
+def fake_presolve(route):
+    presolve_calls.append(json.loads(route.request.post_data))
+    route.fulfill(status=202, json={"queued": True})
+
+
+def wait_until(page, cond, ms=8000):
+    for _ in range(ms // 200):
+        if cond():
+            return True
+        page.wait_for_timeout(200)
+    return cond()
+
+
 def act(page, action):
     """Click an action next to the lassoed lines and wait until the chip knows what the selection is."""
     page.click(f"[data-action={action}]")
@@ -119,6 +132,7 @@ with sync_playwright() as p:
     page.route("**/api/check", fake_reasoner)
     page.route("**/api/assist", fake_assist)
     page.route("**/api/structure", fake_structure)
+    page.route("**/api/presolve", fake_presolve)
     page.goto("http://localhost:5173/")
     page.wait_for_load_state("networkidle")
     page.click("text=+ New notebook")
@@ -218,7 +232,9 @@ with sync_playwright() as p:
         stroke(page, [(120 + i * 40, 520), (145 + i * 40, 510)])
     for i in range(5):
         stroke(page, [(120 + i * 40, 590), (145 + i * 40, 580)])
-    page.wait_for_timeout(1500)
+    # After a pause the page is labelled and the problem starts solving in the background.
+    check(wait_until(page, lambda: any("Show there is" in c["problem"] for c in presolve_calls)),
+          f"the problem found on the page is solved in the background ({presolve_calls})")
     lasso(page, 100, 490, 340, 615)
     act(page, "hint")
     check(page.locator(".chip-row", has_text="I read your lines as").count() == 1
@@ -234,6 +250,7 @@ with sync_playwright() as p:
     sent = assist_calls[-1]
     check((sent["action"], sent["kind"], sent["problem"]) == ("hint", "problem", None)
           and "Show there is" in sent["selection"] and "Let" in sent["selection"], f"hint request ({sent})")
+    check(sent["selection"] in [c["problem"] for c in presolve_calls], "the hint asks about the same text that was presolved")
     check(len(js(page, "return Object.keys(editor.getDocumentSettings().meta.structure)")) == 1, "labels kept with the notebook")
 
     # Copying: the card's Copy button, and highlighting card text with the mouse + Ctrl+C.
@@ -317,6 +334,24 @@ with sync_playwright() as p:
     sent = assist_calls[-1]
     check(sent["kind"] == "steps" and "Show there is" in (sent["problem"] or ""), f"hint on a step carries its problem ({sent})")
     page.screenshot(path=f"{OUT}/p3_step_hint.png")
+
+    # A step on the next page still finds its problem on the page before.
+    page.click("text=+ Page")
+    page2 = js(page, "return editor.getCurrentPageShapes().filter(s => s.type === 'mellow-page').sort((a, b) => a.y - b.y)[1].y")
+    js(page, f"editor.centerOnPoint({{x: 400, y: {page2 + 250}}})")
+    page.wait_for_timeout(300)
+    js(page, "editor.setCurrentTool('draw')")
+    stroke(page, [(120, page2 + 200), (150, page2 + 190), (170, page2 + 205)])
+    stroke(page, [(190, page2 + 195), (220, page2 + 200)])
+    page.wait_for_timeout(1500)
+    lasso(page, 100, page2 + 170, 250, page2 + 230)
+    act(page, "hint")
+    check("Show there is" in page.locator(".chip-row", has_text="The problem these steps").inner_text().replace("\xa0", " "),
+          "a step on page 2 finds the problem on page 1")
+    confirm(page)
+    n_cards(page, 10)
+    check("Show there is" in (assist_calls[-1]["problem"] or ""), "and sends it with the hint")
+    page.screenshot(path=f"{OUT}/p3_next_page.png")
 
     check(not errors, f"no page errors {errors}")
     browser.close()

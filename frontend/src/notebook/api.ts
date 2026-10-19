@@ -67,5 +67,6 @@ export const api = {
   check: (body: { current: string; context: string[]; problem: string | null; confirmed: true }) =>
     post<CheckResult>('/check', { ...body, reasoning_model: reasoner() }),
   assist: (body: AssistBody) => post<CheckResult>('/assist', { ...body, reasoning_model: reasoner() }),
+  presolve: (problem: string) => post<{ queued: boolean }>('/presolve', { problem, reasoning_model: reasoner() }),
   structure: (lines: string[]) => post<Structure>('/structure', { lines, reader_model: choices.get()?.reader }),
 };
