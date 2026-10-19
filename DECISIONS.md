@@ -144,7 +144,7 @@ each line's problem listed). MyScript's math mode reads words as single letters
 ("l e t f"), so a run of 3+ letters counts as words: the line goes to the LLM reader,
 and old readings like that are re-read when the notebook opens.
 
-## 18. Students choose hints or answers for proof steps in words
+## 18. Students choose hints or answers for proof steps in words (replaced by #19)
 
 The notebook's toolbar has a Hints / Answers switch, saved per browser. Hints is the
 default and keeps SPEC §4's rule: one guiding question, never a verdict. Answers was the
@@ -155,3 +155,40 @@ SymPy's "Follows" / "Counterexample". The model judges only what is written: a t
 used without naming it or checking its hypotheses counts as a gap. Answers run at higher
 thinking effort, and the two modes are cached separately. Algebra lines still get SymPy's
 verdicts in both modes, and confirm-before-judge applies to both.
+
+## 19. Four selection actions replace the Hints / Answers switch
+
+Selecting work offers Check, Hint, Answer and Explain with AI (user's call, 2026-10-19).
+The student picks the kind of help per selection instead of setting a mode for the whole
+notebook, so the toolbar switch from #18 goes. Check judges only what is written: SymPy
+for algebra, and for steps in words the reasoning model's holds / gap / error, labelled
+"AI, not verified" like #18's answers. Hint keeps #17's rules (one question, no verdict).
+Explain starts as a text card and gains an animated scene version in P3b; the user wants
+both. What each action does depends on whether the selection is a problem, proof steps or
+a concept (SPEC §4 table).
+
+## 20. A problem is solved once, checked, and reused by Hint, Answer and Explain
+
+Hints written without a solution are blind: the model asks about the "weakest point"
+without knowing where the proof goes. So the reasoning model first writes the proof as
+structured steps (prose plus the LaTeX claim, if any). SymPy checks each algebra claim
+against the previous one; a counterexample goes back to the model for one retry, and an
+answer that still fails is never used. The checked answer is stored server-side, keyed by
+the problem, and only sent to the browser when the student asks for it. All three actions
+build on the same answer, so they can't contradict each other and only the first press
+pays for the solve. SymPy can't check logic (quantifiers, cases, named theorems), so each
+step is marked "✓ checked by SymPy" or "not machine-checked". Lean would check the logic
+too, but was left out for now: a mistranslated statement still gets a ✓, LLM-written Lean
+often doesn't compile, and running it needs a sandboxed service.
+
+## 21. Lines get roles and segments; context is found by structure, not RAG
+
+Each line's reading gains a role (problem, definition, claim, proof step, algebra,
+concept, note), and lines are grouped into segments with a one-line description. A cheap
+model labels a segment per call when the student pauses; labels are keyed by line key, so
+an edit invalidates them like it invalidates readings. An action's context is then a
+lookup (the segment's problem, its steps, earlier definitions) instead of "the 8 lines
+above". RAG is deferred: a notebook's text fits in the prompt, structure finds the right
+lines exactly where embedding search is fuzzy, and the model already knows intro proofs.
+It pays off for course-specific material (lecture notes, numbered lemmas), which arrives
+with PDF import in P5.

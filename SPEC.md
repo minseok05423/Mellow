@@ -51,12 +51,47 @@ a native iOS app, payments, teacher dashboards.
 line) and picks an action. The assistant does nothing on its own. [default] A later
 option is to offer to check automatically after a pause; off in the MVP.
 
-**Selection menu:**
-1. **Check this step.** Verifies the selection against the line above.
-2. **Explain / animate.** An animated explanation of why it holds.
-3. **Hint.** A question or partial step, never the full answer.
-4. **Visualize.** Inserts a widget (e.g. ε–δ) when the selection names a concept
-   we have one for. Starting widget library: ε–δ continuity (exists as M1).
+**Selection menu** (four actions, DECISIONS #19):
+1. **Check.** Is what the student wrote sound? Algebra gets SymPy verdicts; steps in
+   words get the reasoning model's holds / gap / error, labelled "AI, not verified".
+   Never gives fixes or the next step.
+2. **Hint.** One question toward the next step, along the student's own route.
+3. **Answer.** The checked proof (problem), whether the steps hold plus the fix
+   (proof steps), or a short definition (concept).
+4. **Explain with AI.** A problem: the checked proof, walked through. A concept: an
+   explanation with an example. A text card first; an animated board version
+   (scene JSON) alongside it once the scene renderer lands.
+
+What each action does depends on what the selection *is* (problem, proof steps or
+concept), which comes from the document structure below.
+
+| Selection | Check | Hint | Answer | Explain |
+|---|---|---|---|---|
+| Problem | "a problem, not a step; try Hint" | how to start | the checked proof | the proof, why each step works |
+| Proof steps | sound? (SymPy for algebra) | next step, their route | holds? + fix | what each of their steps does |
+| Concept | nothing to check | a question testing understanding | short definition | explanation + example |
+
+**Solve once, reuse (DECISIONS #20):** for a problem, Hint, Answer and Explain all
+use one stored answer: the reasoning model writes the proof as structured steps,
+SymPy checks every algebra claim (a counterexample goes back to the model for one
+retry), and the result is stored server-side, keyed by the problem. Each step is
+marked "✓ checked by SymPy" or "not machine-checked". The answer never reaches the
+browser until the student asks for it. A Hint treats the stored answer as a
+reference, not a target: a different valid route gets hints along that route. If
+no checked answer can be produced, Hint falls back to a question with no answer
+behind it, and Answer / Explain say so.
+
+**Document structure (DECISIONS #21):** on top of the readings, each line gets a
+role (problem | definition | claim | proof step | algebra | concept | note) and
+lines are grouped into segments with a one-line description ("Problem 3: prove √2
+is irrational"). A cheap model labels a whole segment per call, when the student
+pauses. Context for an action is found by structure: the segment's problem, its
+steps so far, and definitions written earlier on the page. The problem an action
+is built from is shown in the confirm box, so a wrong label is fixed before
+anything is judged. Retrieval (RAG) over course material waits for P5's PDFs.
+
+**Visualize** (P3): inserts a widget (e.g. ε–δ) when the selection names a concept
+we have one for. Starting widget library: ε–δ continuity (exists as M1).
 
 **Reading handwriting (hybrid, continuous):**
 - **Primary: a stroke-based math recognizer** (Mathpix Strokes or MyScript iink; chosen
@@ -85,11 +120,10 @@ option is to offer to check automatically after a pause; off in the MVP.
 2. **Confirm chip:** "I read: 2q² = p²  ✓ ✎". The student confirms or fixes the
    reading before anything is judged. Not optional: a misread must never become a
    false "wrong". Live readings make this a glance rather than a wait.
-3. The action endpoint (`/check`, `/explain`, `/hint`, `/visualize`) runs.
+3. The action endpoint (`/check`, `/hint`, `/answer`, `/explain`, `/visualize`) runs.
    - SymPy verifies algebra.
-   - Steps SymPy can't verify get question-style feedback, never verdicts (**Hints**, the default).
-     A student who picks **Answers** gets the reasoning model's direct answer instead, labelled
-     "AI, not verified" (DECISIONS #18).
+   - Anything SymPy can't verify that states a judgement is labelled "AI, not
+     verified" and never reuses SymPy's "Follows" / "Counterexample".
 4. The result is drawn as a **board object** on the page, placed in free space next
    to the selection by deterministic layout code (the LLM never picks coordinates).
    Board objects are ordinary page objects: the student can move or delete them,
@@ -239,8 +273,14 @@ SymPy verification, API key server-side only. **Added:** confirm-before-judge.
    - The backend gets validation, retry, cache and logging.
    - Feedback is drawn as a board object.
    - *Test:* the 5 known-wrong steps are caught, with zero false "wrong" verdicts.
-3. **P3 Explain / Hint / Visualize.**
-   - The scene renderer (old M2) as a custom shape; ε–δ ported as the first widget.
+3. **P3 Structure + four actions + Visualize.**
+   - P3a: line roles and segments; the selection menu (Check / Hint / Answer /
+     Explain) replacing the Hints/Answers switch; solve-once checked answers;
+     Explain as a text card.
+   - P3b: the scene renderer (old M2) as a custom shape, so Explain also plays as
+     an animated board; ε–δ ported as the first widget; streaming text into cards.
+   - *Test:* a wrong step in an LLM answer is caught by SymPy before any student
+     sees it; Hint on a mid-proof step uses the segment's problem.
 4. **User test #1:** 3–5 students on iPads, each working one proof with the
    assistant. Decide what to change *before* building P4–P6.
 5. **P4 Accounts + sync + learning log + progress view.**

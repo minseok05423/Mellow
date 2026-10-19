@@ -395,8 +395,6 @@ These are marked `shortcut:` in the code.
 - **Bake-off samples:** record 30–50 handwritten lines on a pen device and run the bake-off.
 - **Mathpix keys:** add them if you want Mathpix in the bake-off.
 - **A tldraw license key:** for the forwarded URL and iPad tests.
-- **Commit the work:** nothing has been committed beyond the initial commit. Say "commit" and
-  it goes on a new branch, leaving your `a.py` out.
 - **Open questions (SPEC §11):**
   - Will Mellow be commercial? This decides the tldraw license.
   - Sign-in method.
@@ -404,9 +402,13 @@ These are marked `shortcut:` in the code.
   - Recognizer vendor pricing.
 
 ### Build order (SPEC §9)
-- **P3 Explain / Hint / Visualize:**
+- **P3a Structure + four actions** (DECISIONS #19–21, designed 2026-10-19):
+  - line roles + segments, labelled by a cheap model
+  - selection menu: Check / Hint / Answer / Explain, replacing the Hints/Answers switch
+  - a problem is solved once, its algebra checked by SymPy, and the answer stored server-side
+  - Explain as a text card
+- **P3b Explain / Visualize:**
   - animated explanations played from scene JSON
-  - a Hint action
   - the ε–δ widget on the page
   - the reasoning-model test
   - streaming text into cards
