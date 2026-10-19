@@ -58,9 +58,10 @@ option is to offer to check automatically after a pause; off in the MVP.
 2. **Hint.** One question toward the next step, along the student's own route.
 3. **Answer.** The checked proof (problem), whether the steps hold plus the fix
    (proof steps), or a short definition (concept).
-4. **Explain with AI.** A problem: the checked proof, walked through. A concept: an
-   explanation with an example. A text card first; an animated board version
-   (scene JSON) alongside it once the scene renderer lands.
+4. **Explain with AI.** A problem: the checked proof played on an animated board
+   (scene JSON built from the proof, DECISIONS #23), its text one Copy away. Proof
+   steps or a concept: a text card (what each step does; an explanation with an
+   example).
 
 What each action does depends on what the selection *is* (problem, proof steps or
 concept), which comes from the document structure below.

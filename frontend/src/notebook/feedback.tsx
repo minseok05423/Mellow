@@ -112,10 +112,18 @@ export function placeNear(editor: Editor, near: Box, w: number, h: number): { x:
     { x: near.maxX + 24, y: near.minY },
     { x: Math.max(page?.x ?? 0, near.minX), y: near.maxY + 12 },
   ].filter((p) => p.x + w <= pageRight - 8);
-  for (const start of starts) {
-    for (let dy = 0; dy < 600; dy += 16) {
-      const b = new Box(start.x, start.y + dy, w, h);
-      if (free(b)) return { x: b.x, y: b.y };
+  // Prefer a spot that stays on the page (a tall explanation board would otherwise hang off its bottom):
+  // stepping down first, then up; failing that, anywhere free below.
+  const pageBottom = page ? page.y + page.props.h - 8 : Infinity;
+  const down = Array.from({ length: 38 }, (_, i) => i * 16);
+  const up = Array.from({ length: 25 }, (_, i) => -(i + 1) * 16);
+  // Every downward spot (right of the selection, then below it) before any upward one, as before this change.
+  for (const [onPage, offsets] of [[true, down], [true, up], [false, down]] as const) {
+    for (const start of starts) {
+      for (const dy of offsets) {
+        const b = new Box(start.x, start.y + dy, w, h);
+        if (free(b) && (!onPage || (b.maxY <= pageBottom && b.minY >= (page?.y ?? -Infinity) + 8))) return { x: b.x, y: b.y };
+      }
     }
   }
   return { x: near.minX, y: near.maxY + 12 };

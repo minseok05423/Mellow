@@ -214,3 +214,19 @@ one (an in-process lock per problem). Presolving uses unconfirmed readings, whic
 because nothing is shown; a corrected problem just solves again. It has its own daily cap
 (30) so background work can't use up the student's 50 reasoning calls. The cost is one solve
 per problem written, even if no button is pressed: about a cent each at DeepSeek's prices.
+
+## 23. Animated explanations are built by code from the checked proof
+
+Explain on a problem plays the proof on a dark board (3Blue1Brown style), one step per
+click, with the step's words and why it holds as the caption. The scene JSON is built by
+code from the proof SymPy already checked, not by another LLM call: the board can only show
+claims the checker has seen (with "✓ checked by SymPy" where it passed), it is instant and
+free, and positions come from our layout, never the model. A claim that rewrites the
+previous one (same left side) becomes a `transform`, so an equation visibly evolves in
+place; steps with nothing to draw join the next caption; the conclusion `highlight`s the
+last line; a full board fades and starts again. The browser player (scene.tsx) does
+Manim-style motion with anim.ts's `smooth` easing: `write` draws left to right, `transform`
+moves the glyphs two equations share to their new places (matched by symbol, in reading
+order) while the rest cross-fade, `highlight` pulses and turns yellow. Reduced-motion
+settings skip the motion. LLM-written scenes (the /scene endpoint) can come later; they
+would need the scene-json validator and SymPy checks on their algebra.

@@ -32,6 +32,7 @@ class CheckResponse(BaseModel):
     counterexample: dict[str, str] = {}
     values: dict[str, str] = {}
     compared_with: str | None = None
+    scene: dict | None = None  # Explain on a problem: the checked proof as an animated board (scene JSON)
 
 
 QUESTIONS = {

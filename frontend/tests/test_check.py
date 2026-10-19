@@ -63,6 +63,12 @@ QUESTION = "Which theorem gets you from here to $f(c)=c$?"
 JUDGEMENT = "Gap: you use the IVT on $g$ without saying why $g$ is continuous."
 ANSWER = "1. Let $g(x) = f(x) - x$. ✓\n2. By the IVT, $g$ has a root $c$.\n✓ = algebra checked by SymPy."
 EXPLANATION = "1. Let $g(x) = f(x) - x$.\n    Why: a root of $g$ is a fixed point of $f$."
+# What the backend's scene builder makes of a checked proof: an equation that evolves in place, then a highlight.
+SCENE = {"schema_version": 1, "steps": [
+    {"id": "s1", "op": "write", "latex": "g(x)=f(x)-x", "pos": [0.05, 0.07], "say": "Let $g(x) = f(x) - x$."},
+    {"id": "s2", "op": "write", "latex": "g(0)=f(0)-0", "pos": [0.05, 0.195], "say": "At $0$.\nWhy: plug in ✓ checked by SymPy"},
+    {"id": "s3", "op": "transform", "from": "s2", "latex": "g(0)=f(0)", "say": "Simplify."},
+    {"id": "s4", "op": "highlight", "target": "s3", "say": "So $g(0) \\ge 0$."}]}
 
 
 def card(verdict, message):
@@ -81,7 +87,10 @@ def fake_reasoner(route):
 def fake_assist(route):
     body = json.loads(route.request.post_data)
     assist_calls.append(body)
-    route.fulfill(json=card(body["action"], {"hint": QUESTION, "answer": ANSWER, "explain": EXPLANATION}[body["action"]]))
+    reply = card(body["action"], {"hint": QUESTION, "answer": ANSWER, "explain": EXPLANATION}[body["action"]])
+    if body["action"] == "explain" and body["kind"] == "problem":
+        reply["scene"] = SCENE
+    route.fulfill(json=reply)
 
 
 def fake_structure(route):
@@ -280,19 +289,47 @@ with sync_playwright() as p:
     a = n_cards(page, 4)
     check(a["verdict"] == "answer" and "✓" in a["message"], "Answer gives the checked proof")
     check("Answer · AI" in page.locator(".feedback-answer").inner_text(), "answer card is labelled as the AI's")
+    page.screenshot(path=f"{OUT}/p3_answer.png")
+
+    # Explain on a problem: an animated board that plays the checked proof step by step.
     lasso(page, 100, 490, 340, 615)
     act(page, "explain")
     confirm(page)
-    e = n_cards(page, 5)
-    check(e["verdict"] == "explain" and "Why:" in e["message"], "Explain walks through the proof")
-    page.screenshot(path=f"{OUT}/p3_answer_explain.png")
+    page.wait_for_selector(".scene")
+    board = page.locator(".scene")
+    shape = js(page, "return editor.getCurrentPageShapes().find(s => s.type === 'mellow-scene').props")
+    check("Why:" in shape["message"] and json.loads(shape["scene"]) == SCENE, "Explain places a board with the scene and its text")
+    # The board can sit below the fold, so its buttons are pressed via the DOM (the camera stays put for the
+    # strokes drawn later in this test).
+    play = lambda: page.evaluate("document.querySelector('.scene .scene-controls .primary').click()")
+    idle = "!document.querySelector('.scene .scene-controls .primary').disabled"
+    for _ in range(2):
+        play()
+        page.wait_for_function(idle, timeout=5000)
+    check(board.locator(".scene-obj").count() == 2 and board.locator(".scene-count").inner_text() == "2 / 4",
+          "each click plays one step")
+    check("checked by SymPy" in board.locator(".scene-checked").inner_text(), "checked steps say so")
+    play()
+    page.wait_for_timeout(400)
+    page.screenshot(path=f"{OUT}/p3_scene_transform.png")
+    page.wait_for_function(idle, timeout=5000)
+    check(board.locator(".scene-obj").count() == 2 and "f(0)" in board.locator(".scene-obj").last.inner_text(),
+          "transform replaces the line in place")
+    play()
+    page.wait_for_function("document.querySelector('.scene .scene-controls .primary').textContent === 'Done'", timeout=5000)
+    check(board.locator(".scene-lit").count() == 1, "the closing highlight lights the last line")
+    page.screenshot(path=f"{OUT}/p3_scene_end.png")
+    page.evaluate("[...document.querySelectorAll('.scene .scene-controls button')].find(b => b.textContent.includes('Replay')).click()")
+    check(board.locator(".scene-obj").count() == 0 and board.locator(".scene-count").inner_text() == "0 / 4", "Replay starts over")
+    # Out of the way of the lines written below in this test (a press on a board or card is for it, not the pen).
+    js(page, "editor.deleteShapes(editor.getCurrentPageShapes().filter(s => s.type === 'mellow-scene'))")
 
     # Check on a problem: nothing to check, and no request.
     calls = len(check_calls)
     lasso(page, 100, 490, 340, 615)
     act(page, "check")
     confirm(page)
-    c = n_cards(page, 6)
+    c = n_cards(page, 5)
     check(c["verdict"] == "noted" and "nothing to check" in c["message"] and len(check_calls) == calls,
           "Check on a problem says there's nothing to check yet")
 
@@ -300,7 +337,7 @@ with sync_playwright() as p:
     lasso(page, 100, 170, 260, 425)
     act(page, "check")
     confirm(page)
-    last = n_cards(page, 7)
+    last = n_cards(page, 6)
     check(last["verdict"] == "refuted" and "Line 2:" in last["message"], f"one card for three lines ({last['message']})")
 
     # Words read letter by letter are a proof step: the AI judges them (never a SymPy refutation), with the
@@ -315,7 +352,7 @@ with sync_playwright() as p:
           "the chip shows the problem found above")
     page.screenshot(path=f"{OUT}/p3_steps_chip.png")
     confirm(page)
-    last = n_cards(page, 8)
+    last = n_cards(page, 7)
     check(last["verdict"] == "ai_check" and last["message"] == JUDGEMENT,
           f"letter-by-letter words get the AI's judgement, never a refutation ({last['verdict']})")
     check("Show there is" in (check_calls[-1].get("problem") or ""), "the check request carries the problem")
@@ -330,7 +367,7 @@ with sync_playwright() as p:
     lasso(page, 100, 670, 320, 725)
     act(page, "hint")
     confirm(page)
-    n_cards(page, 9)
+    n_cards(page, 8)
     sent = assist_calls[-1]
     check(sent["kind"] == "steps" and "Show there is" in (sent["problem"] or ""), f"hint on a step carries its problem ({sent})")
     page.screenshot(path=f"{OUT}/p3_step_hint.png")
@@ -349,7 +386,7 @@ with sync_playwright() as p:
     check("Show there is" in page.locator(".chip-row", has_text="The problem these steps").inner_text().replace("\xa0", " "),
           "a step on page 2 finds the problem on page 1")
     confirm(page)
-    n_cards(page, 10)
+    n_cards(page, 9)
     check("Show there is" in (assist_calls[-1]["problem"] or ""), "and sends it with the hint")
     page.screenshot(path=f"{OUT}/p3_next_page.png")
 

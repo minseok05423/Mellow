@@ -128,8 +128,10 @@ These are kept even in "minimal" mode:
   - ? **Hint**: one question toward the next step.
   - ✦ **Answer · AI**: the proof (steps whose algebra SymPy checked are marked ✓), whether the
     selected steps hold and how to fix them, or a definition.
-  - ❋ **Explanation · AI**: the proof with why each step holds, what the selected steps do, or a
-    concept explained with an example.
+  - ❋ **Explanation · AI**: on a problem, an **animated board** that plays the checked proof one
+    click at a time: equations draw in, rewrite themselves in place (shared symbols slide to their
+    new spots), and the conclusion lights up; captions say what each step does, why, and whether
+    SymPy checked it. Replay starts over; Copy gives the text. On steps or a concept, a text card.
   - • **Noted**: nothing to check, no reasoning model available, or no checked proof.
 - **Cards** are ordinary page objects. Code places them in free space next to the selection
   (the LLM never picks positions). You can move or delete them, and they're saved with the
@@ -273,7 +275,8 @@ frontend/          Vite 8 + React 19 + TypeScript + tldraw 5.5 + KaTeX
     lines.ts        groups strokes into lines
     readings.ts     live reading, readings store, re-read of letter-by-letter readings
     CheckUI.tsx     readings under lines, the four action buttons, confirm box, combining results
-    structure.ts    page labels (roles + segments) and finding an action's context
+    structure.ts    page labels (roles + segments), background solving, finding an action's context
+    scene.tsx       the animated explanation board: plays scene JSON with Manim-style motion
     feedback.tsx    feedback card shape, placement, Copy button
     models.ts       model catalog/choices
     samples.ts      bake-off sample recording/download
@@ -290,10 +293,11 @@ backend/           FastAPI + Pydantic + SymPy + SQLite
     check.py        /check: SymPy for algebra, the AI's holds / gap / error for words, templates
     assist.py       /assist: solve + SymPy-verify once, then hint / answer / explain
     structure.py    /structure: page labels from a cheap model
+    scene.py        a checked proof -> scene JSON for the board
     catalog.py      model catalog with prices
     store.py        SQLite: request log, cache, quotas
   bakeoff/run.py    recognizer bake-off over recorded samples
-  tests/            pytest suite (77 tests)
+  tests/            pytest suite (80 tests)
 ```
 
 ---
@@ -326,7 +330,7 @@ and word lines get "Noted".
 
 **Tests:**
 ```bash
-cd backend && .venv/bin/python -m pytest -q                       # 77 pass, never call real APIs
+cd backend && .venv/bin/python -m pytest -q                       # 80 pass, never call real APIs
 python3 -m venv ~/.venvs/mellow-tests                             # one-time Playwright setup
 ~/.venvs/mellow-tests/bin/pip install -r frontend/tests/requirements.txt
 ~/.venvs/mellow-tests/bin/playwright install chromium
@@ -378,6 +382,7 @@ cd backend && .venv/bin/python -m bakeoff.run ~/Downloads/mellow-samples-*.json
     claims against earlier ones), and reused by Hint, Answer and Explain. Lean left out for now.
 21. **Lines get roles and segments;** context is found by structure, not RAG (RAG waits for P5).
 22. **Problems are solved in the background** once the page labels find them (own cap: 30/day).
+23. **Animated explanations are built by code** from the checked proof (no extra LLM call).
 
 ---
 
@@ -432,8 +437,7 @@ These are marked `shortcut:` in the code.
   - Recognizer vendor pricing.
 
 ### Build order (SPEC §9)
-- **P3b Explain / Visualize:**
-  - animated explanations played from scene JSON
+- **P3b rest** (the animated Explain board is done):
   - the ε–δ widget on the page
   - the reasoning-model test
   - streaming text into cards

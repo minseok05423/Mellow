@@ -37,3 +37,24 @@ export class Tween {
     return lerp(this.from, this.to, this.ease(t));
   }
 }
+
+const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/** Call `frame(t)` every animation frame for `ms`, with t eased from 0 to 1; resolves when done.
+ * With reduced motion turned on in the OS, it jumps straight to the end. */
+export function play(ms: number, frame: (t: number) => void, ease: Easing = smooth): Promise<void> {
+  if (reducedMotion() || ms <= 0) {
+    frame(1);
+    return Promise.resolve();
+  }
+  return new Promise((done) => {
+    const start = performance.now();
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / ms);
+      frame(ease(t));
+      if (t < 1) requestAnimationFrame(tick);
+      else done();
+    };
+    requestAnimationFrame(tick);
+  });
+}

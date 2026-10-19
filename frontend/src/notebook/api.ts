@@ -1,6 +1,7 @@
 // Calls to our backend (via Vite's /api proxy). The browser never talks to an LLM or recognition vendor.
 
 import { choices } from './models';
+import type { Scene } from './scene';
 
 function userId(): string {
   // shortcut: an anonymous per-browser id for daily caps and logs. Upgrade path: accounts in P4.
@@ -41,6 +42,7 @@ export interface CheckResult {
   counterexample: Record<string, string>;
   values: Record<string, string>;
   compared_with: string | null;
+  scene?: Scene | null; // Explain on a problem: the checked proof as an animated board
 }
 
 export type Role = 'problem' | 'definition' | 'claim' | 'proof_step' | 'algebra' | 'concept' | 'note';

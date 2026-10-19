@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from . import config, llm
 from .check import CheckResponse, VERDICT_WORDS, assignment
+from .scene import proof_scene
 from .verify import check_step
 
 
@@ -223,8 +224,9 @@ def assist(req: AssistRequest, user: str) -> CheckResponse:
     if req.kind == "problem" and req.action != "hint":
         if proof is None:
             return CheckResponse(verdict="noted", reason="no_checked_answer", message=NO_PROOF)
+        explain = req.action == "explain"
         return CheckResponse(verdict=req.action, reason=f"{req.action}_problem",
-                             message=format_proof(proof, why=req.action == "explain"))
+                             message=format_proof(proof, why=explain), scene=proof_scene(proof) if explain else None)
 
     if req.action == "hint":
         prompt = "hint_concept" if req.kind == "concept" else "hint_ref" if proof else "hint_blind"

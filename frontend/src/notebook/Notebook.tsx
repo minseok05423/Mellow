@@ -26,6 +26,7 @@ import 'katex/contrib/copy-tex'; // copying rendered math gives its LaTeX source
 import 'tldraw/tldraw.css';
 import { CheckUI, ReadingsOverlay } from './CheckUI';
 import { FeedbackShapeUtil } from './feedback';
+import { SceneShapeUtil } from './scene';
 import { recordInk } from './ink';
 import {
   Catalog, Choices, ModelOption, catalog, choices, loadModels, setChoice,
@@ -38,7 +39,7 @@ import { PAPERS, PageShapeUtil, Paper, addPage, getPageInView, installPages, set
 import { SampleKind, countSamples, downloadSamples, saveSample, selectedInkShapes } from './samples';
 
 // Module-level constants, so <Tldraw> doesn't see new objects on every render.
-const shapeUtils = [PageShapeUtil, FeedbackShapeUtil];
+const shapeUtils = [PageShapeUtil, FeedbackShapeUtil, SceneShapeUtil];
 const tools = [LassoSelectTool];
 const overlayUtils = [LassoOverlayUtil];
 

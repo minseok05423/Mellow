@@ -11,6 +11,7 @@ import { Line, getLines, linesAbove, linesForStrokes } from './lines';
 import { LineReading, getReadings, looksLikeWords, readingStatus, setReading, showReadings } from './readings';
 import { selectedInkShapes } from './samples';
 import { getPages } from './pages';
+import { addScene } from './scene';
 import { ActionContext, actionContext, ensureStructure, joinReadings } from './structure';
 
 function Tex({ latex, className }: { latex: string; className?: string }) {
@@ -233,7 +234,8 @@ export function CheckUI() {
           .filter((r) => r?.latex && (action !== 'answer' || r.confirmed)).map((r) => r.latex);
         const result = await api.assist({ action, kind, selection: texts.filter(Boolean).join('\n'), problem,
           work: kind === 'steps' ? usable(ctx?.work) : [], definitions: usable(ctx?.definitions), confirmed: true });
-        addFeedback(editor, box, shown, result);
+        if (result.scene) addScene(editor, box, shown, result);
+        else addFeedback(editor, box, shown, result);
       }
       setChip(null);
       editor.selectNone();
