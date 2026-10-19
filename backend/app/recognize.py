@@ -26,8 +26,8 @@ class Stroke(BaseModel):
 
 
 class RecognizeRequest(BaseModel):
-    strokes: list[Stroke] = Field(min_length=1, max_length=400)
-    image: str | None = None  # PNG data URL of the line, for the LLM fallback
+    strokes: list[Stroke] = Field(default_factory=list, max_length=400)  # none for an image on the page
+    image: str | None = None  # PNG data URL of the line (or of a pasted image), for the LLM reader
     context: list[str] = Field(default_factory=list, max_length=8)  # confirmed lines above, oldest first
     # The student's choices (Models menu). None = server default. Checked against the catalog by the route.
     recognizer: str | None = None
@@ -148,14 +148,17 @@ def _semantic_check(r: FallbackReading) -> list[str]:
 def read_with_llm(req: RecognizeRequest, user: str, guess: Reading | None, model: str) -> Reading:
     m = re.match(r"data:(image/\w+);base64,(.+)", req.image or "", re.S)
     if not m:
-        raise ValueError("the LLM fallback needs a PNG data URL image of the line")
+        raise ValueError("the image reader needs a PNG data URL of the line or image")
     media_type, data = m.groups()
     text = "Confirmed lines above (oldest first):\n" + ("\n".join(req.context) or "(none)")
     if guess and guess.latex:
         text += f"\n\nStroke recognizer's guess ({guess.source}, confidence {guess.confidence}): {guess.latex}"
     content = [
         {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": data}},
-        {"type": "text", "text": text + "\n\nTranscribe the line in the image."},
+        # A pasted image (a problem sheet, a photo of work) can hold several lines: read all of it, in order.
+        {"type": "text", "text": text + ("\n\nTranscribe the line in the image." if req.strokes else
+                                         "\n\nThis is an image the student pasted, not one handwritten line: transcribe "
+                                         "all of its math and text, in reading order.")},
     ]
     image_hash = hashlib.sha256(data.encode()).hexdigest()
     out = llm.structured_call(
@@ -173,7 +176,7 @@ def recognize(req: RecognizeRequest, user: str) -> Reading:
     rec = req.recognizer or config.RECOGNIZER
     reader = req.reader_model or config.FALLBACK_READER_MODEL
     guess = None
-    if recognizer_configured(rec):
+    if req.strokes and recognizer_configured(rec):  # a pasted image has no strokes: straight to the image reader
         key = llm.cache_key("strokes", [s.pts for s in req.strokes], rec)
         if (hit := store.cache_get(key)) is not None:
             guess = Reading.model_validate(hit)

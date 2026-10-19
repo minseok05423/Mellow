@@ -43,7 +43,7 @@ def lasso(page, x0, y0, x1, y1):
 
 
 # Fake recognizer: line 1 (3 strokes) reads "(a+b)^2", line 2 (2 strokes) "a^2+b^2", anything else unread.
-READS = {3: "(a+b)^2", 2: "a^2+b^2",
+READS = {3: "(a+b)^2", 2: "a^2+b^2", 0: r"\text{Show that } 2^n > n \text{ for every } n",  # 0 strokes: a pasted image
          6: r"C o n t i n u o u s . s h o w",  # how MyScript's math mode reads words
          4: r"\text{Let } f:[0,1]\to[0,1] \text{ be}", 5: r"\text{continuous. Show there is } c \text{ with } f(c)=c"}
 recognize_calls = []
@@ -418,6 +418,24 @@ with sync_playwright() as p:
     n_cards(page, 9)
     check("Show there is" in (assist_calls[-1]["problem"] or ""), "and sends it with the hint")
     page.screenshot(path=f"{OUT}/p3_next_page.png")
+
+    # A pasted image (a screenshot of a problem sheet) is read by the image reader and works like handwriting.
+    js(page, f"""editor.createAssets([{{id: 'asset:sheet', typeName: 'asset', type: 'image', meta: {{}},
+        props: {{name: 'sheet.png', w: 300, h: 80, mimeType: 'image/png', isAnimated: false,
+                 src: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='}}}}]);
+        editor.createShape({{type: 'image', x: 120, y: {page2 + 320}, props: {{assetId: 'asset:sheet', w: 300, h: 80}}}})""")
+    check(wait_until(page, lambda: any(c["strokes"] == [] and c["image"].startswith("data:image/png") for c in recognize_calls)),
+          "a pasted image is sent to the image reader, with no strokes")
+    page.wait_for_timeout(500)
+    js(page, "editor.setCurrentTool('select'); editor.select(editor.getCurrentPageShapes().find(s => s.type === 'image').id)")
+    page.wait_for_selector("[data-action=hint]")
+    act(page, "hint")
+    check(page.locator("#chip-kind").input_value() == "problem", "the image's text is labelled as a problem")
+    confirm(page)
+    n_cards(page, 10)
+    check("Show that" in assist_calls[-1]["selection"] and assist_calls[-1]["kind"] == "problem",
+          f"Hint on an image sends what it says ({assist_calls[-1]['selection']})")
+    page.screenshot(path=f"{OUT}/p3_image.png")
 
     check(not errors, f"no page errors {errors}")
     browser.close()

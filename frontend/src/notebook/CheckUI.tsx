@@ -40,13 +40,15 @@ export function ReadingsOverlay() {
         let body;
         if (st === 'reading') body = <span className="reading-busy">reading…</span>;
         else if (st) body = <span className="reading-err" title={st}>couldn't read</span>;
-        else if (r?.latex) body = <Tex latex={r.latex} />;
+        else if (r?.latex) body = l.image // an image's reading is usually long text: let it wrap
+          ? <MathText text={lineText(r.latex.replace(/\n/g, ' \\text{ } '))} /> : <Tex latex={r.latex} />;
         else return null;
         return (
           <div key={l.key}
             className={`reading ${r?.confirmed ? 'reading-confirmed' : ''} ${unsure ? 'reading-unsure' : ''} ${selectable ? 'reading-selectable' : ''}`}
             onPointerDown={selectable ? (e) => { e.stopPropagation(); editor.selectNone(); } : undefined}
-            style={{ transform: `translate(${l.box.minX}px, ${l.box.maxY + 2}px)` }}>
+            style={{ transform: `translate(${l.box.minX}px, ${l.box.maxY + 2}px)`,
+              ...(l.image && { whiteSpace: 'normal', width: l.box.w }) }}>
             {body}{unsure && <span className="reading-q"> ?</span>}
           </div>
         );
@@ -164,7 +166,8 @@ export function CheckUI() {
   // Show the buttons only when the selection is handwriting and nothing is being dragged.
   const target = useValue('check target', () => {
     if (!editor.isIn('select.idle')) return null;
-    const ids = new Set<string>(selectedInkShapes(editor).map((s) => s.id));
+    const ids = new Set<string>([...selectedInkShapes(editor), ...editor.getSelectedShapes().filter((s) => s.type === 'image')]
+      .map((s) => s.id));
     if (ids.size === 0) return null;
     const lines = linesForStrokes(getLines(editor), ids);
     const bounds = editor.getSelectionScreenBounds();

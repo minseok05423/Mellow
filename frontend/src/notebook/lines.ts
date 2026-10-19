@@ -3,7 +3,7 @@
 // between two others can be split or merged wrongly. Upgrade path: use stroke timing from meta.ink, or
 // let the recognizer segment a page region.
 
-import { Box, Editor, TLDrawShape, TLShapeId } from 'tldraw';
+import { Box, Editor, TLDrawShape, TLImageShape, TLShapeId } from 'tldraw';
 import { getInk } from './ink';
 import { getPages } from './pages';
 
@@ -11,6 +11,7 @@ export interface Line {
   key: string; // changes whenever the line's strokes change, so a stale reading is never reused
   pageId: TLShapeId;
   strokes: TLDrawShape[];
+  image?: TLImageShape; // a pasted image (problem sheet, photo of work) is read as one line of its own
   box: Box;
 }
 
@@ -28,6 +29,7 @@ export function getLines(editor: Editor): Line[] {
   const strokes = editor
     .getCurrentPageShapes()
     .filter((s): s is TLDrawShape => s.type === 'draw' && !!getInk(s as TLDrawShape));
+  const images = editor.getCurrentPageShapes().filter((s): s is TLImageShape => s.type === 'image' && !!s.props.assetId);
   const lines: Line[] = [];
 
   for (const page of pages) {
@@ -59,20 +61,28 @@ export function getLines(editor: Editor): Line[] {
         }
       }
     }
-    for (const g of groups.sort((a, b) => a.box.minY - b.box.minY)) {
+    const pageLines: Line[] = groups.map((g) => {
       const sig = g.strokes
         .map((s) => `${s.id}@${Math.round(s.x)},${Math.round(s.y)}`)
         .sort()
         .join('|');
-      lines.push({ key: hash(sig), pageId: page.id, strokes: g.strokes, box: g.box });
+      return { key: hash(sig), pageId: page.id, strokes: g.strokes, box: g.box };
+    });
+    for (const image of images) {
+      const b = editor.getShapePageBounds(image)!;
+      if (!pageBox.containsPoint(b.center)) continue;
+      // Moving, resizing or replacing the image changes its key, so it's read again.
+      const sig = `img:${image.id}:${image.props.assetId}@${[b.x, b.y, b.w, b.h].map(Math.round).join(',')}`;
+      pageLines.push({ key: hash(sig), pageId: page.id, strokes: [], image, box: b });
     }
+    lines.push(...pageLines.sort((a, b) => a.box.minY - b.box.minY));
   }
   return lines;
 }
 
-/** Lines holding any of the given strokes (e.g. the current selection), top to bottom. */
+/** Lines holding any of the given strokes or images (e.g. the current selection), top to bottom. */
 export function linesForStrokes(lines: Line[], ids: Set<string>): Line[] {
-  return lines.filter((l) => l.strokes.some((s) => ids.has(s.id)));
+  return lines.filter((l) => l.strokes.some((s) => ids.has(s.id)) || (l.image && ids.has(l.image.id)));
 }
 
 /** Lines above `line` on the same page, nearest last (the order the checker wants as context). */

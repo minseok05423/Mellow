@@ -87,6 +87,13 @@ def test_low_confidence_goes_to_llm_with_the_guess_and_context(mathpix, fake_llm
     assert "2 9^{2}" in text and "2q^2=p^2" in text
 
 
+def test_a_pasted_image_skips_the_stroke_recognizer_and_reads_everything(mathpix, fake_llm):
+    sent = mathpix({"latex_styled": "x", "confidence": 1.0})
+    r = recognize.recognize(RecognizeRequest(strokes=[], image=IMAGE), "user-1")
+    assert r.source == "llm" and sent == []  # no strokes to send to Mathpix
+    assert "transcribe all of its math and text" in fake_llm.calls[0][0]["content"][1]["text"]
+
+
 def test_prose_goes_to_llm(mathpix, fake_llm):
     mathpix({"text": r"hence \( p \) is even", "confidence": 0.95})
     assert recognize.recognize(req(image=IMAGE), "user-1").source == "llm"

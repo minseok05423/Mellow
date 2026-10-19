@@ -53,7 +53,9 @@ async function readLine(editor: Editor, line: Line, lines: Line[]) {
   try {
     const readings = getReadings(editor);
     const context = linesAbove(lines, line).map((l) => readings[l.key]?.latex).filter(Boolean) as string[];
-    const { url: image } = await editor.toImageDataUrl(line.strokes, { format: 'png', background: true, padding: 16 });
+    // An image is sent at twice its size on the page, so small print in a screenshot stays readable.
+    const { url: image } = await editor.toImageDataUrl(line.image ? [line.image] : line.strokes,
+      { format: 'png', background: true, padding: 16, scale: line.image ? 2 : 1 });
     const r = await api.recognize({ strokes: lineStrokes(line), image, context });
     // The line may have changed while we waited; only store if it still exists.
     if (getLines(editor).some((l) => l.key === line.key)) {
