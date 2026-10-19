@@ -1,7 +1,8 @@
-"""P2 Read + Check, end to end: live readings, lasso -> Check -> confirm chip -> SymPy -> feedback card.
+"""P2 Read + Check and P3a actions, end to end: live readings, lasso -> Check / Hint / Answer / Explain ->
+confirm chip -> SymPy or the reasoning model -> feedback card.
 
-Needs the backend running with no recognizer (RECOGNIZER=none) so /check is real SymPy; recognizer
-answers are faked at the network layer so the test doesn't depend on vendor keys or handwriting quality.
+Needs the backend running so /check on algebra is real SymPy. The recognizer, the page labeller and the
+reasoning model are faked at the network layer, so the test doesn't depend on vendor keys or handwriting.
     python tests/test_check.py <screenshot_dir>
 """
 import json
@@ -57,21 +58,54 @@ def fake_recognize(route):
 
 
 # Word lines go to the reasoning model; fake it here (algebra still goes to the real SymPy backend).
-check_calls = []
+check_calls, assist_calls, structure_calls = [], [], []
 QUESTION = "Which theorem gets you from here to $f(c)=c$?"
-ANSWER = "This holds once you note $g$ is continuous; then the IVT gives the root."
+JUDGEMENT = "Gap: you use the IVT on $g$ without saying why $g$ is continuous."
+ANSWER = "1. Let $g(x) = f(x) - x$. ✓\n2. By the IVT, $g$ has a root $c$.\n✓ = algebra checked by SymPy."
+EXPLANATION = "1. Let $g(x) = f(x) - x$.\n    Why: a root of $g$ is a fixed point of $f$."
+
+
+def card(verdict, message):
+    return {"verdict": verdict, "reason": "fake", "message": message, "counterexample": {}, "values": {}, "compared_with": None}
 
 
 def fake_reasoner(route):
     body = json.loads(route.request.post_data)
     check_calls.append(body)
     if "\\text" in body["current"] or "C o n t" in body["current"]:
-        answer = body.get("mode") == "answer"
-        route.fulfill(json={"verdict": "answer" if answer else "unverified", "reason": "proof_steps",
-                            "message": ANSWER if answer else QUESTION,
-                            "counterexample": {}, "values": {}, "compared_with": None})
+        route.fulfill(json=card("ai_check", JUDGEMENT))
     else:
         route.continue_()
+
+
+def fake_assist(route):
+    body = json.loads(route.request.post_data)
+    assist_calls.append(body)
+    route.fulfill(json=card(body["action"], {"hint": QUESTION, "answer": ANSWER, "explain": EXPLANATION}[body["action"]]))
+
+
+def fake_structure(route):
+    """The statement's lines are a problem, letter-by-letter words a proof step, the rest algebra."""
+    lines = json.loads(route.request.post_data)["lines"]
+    structure_calls.append(lines)
+    role = lambda l: "problem" if "Let" in l or "Show" in l else "proof_step" if "C o n t" in l else "algebra"
+    route.fulfill(json={"lines": [{"role": role(l), "segment": 0} for l in lines], "segments": ["Problem: a fixed point"]})
+
+
+def act(page, action):
+    """Click an action next to the lassoed lines and wait until the chip knows what the selection is."""
+    page.click(f"[data-action={action}]")
+    page.wait_for_selector("#chip-kind")
+
+
+def confirm(page):
+    page.evaluate("document.querySelector('.chip .primary').click()")  # the chip can open below the viewport
+
+
+def n_cards(page, n):
+    page.wait_for_function(f"editor.getCurrentPageShapes().filter(s => s.type === 'mellow-feedback').length === {n}",
+                           timeout=8000)
+    return js(page, "return editor.getCurrentPageShapes().filter(s => s.type === 'mellow-feedback').at(-1).props")
 
 
 with sync_playwright() as p:
@@ -83,6 +117,8 @@ with sync_playwright() as p:
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.route("**/api/recognize", fake_recognize)
     page.route("**/api/check", fake_reasoner)
+    page.route("**/api/assist", fake_assist)
+    page.route("**/api/structure", fake_structure)
     page.goto("http://localhost:5173/")
     page.wait_for_load_state("networkidle")
     page.click("text=+ New notebook")
@@ -124,10 +160,13 @@ with sync_playwright() as p:
 
     # Lasso line 2 -> Check -> chip shows both readings -> confirm.
     lasso(page, 100, 270, 250, 330)
-    page.wait_for_selector(".check-btn")
-    page.click(".check-btn")
-    page.wait_for_selector(".chip")
+    page.wait_for_selector("[data-action=check]")
+    check(page.locator(".action-btn").all_inner_texts() == ["Check ✓", "Hint", "Answer", "Explain with AI"],
+          "four actions next to the selection")
+    page.screenshot(path=f"{OUT}/p3_actions.png")
+    act(page, "check")
     check(page.locator(".chip .chip-read").count() == 2, "chip shows this line and the line above")
+    check(page.locator("#chip-kind").input_value() == "steps", "algebra lines are labelled as steps")
     page.screenshot(path=f"{OUT}/p2_chip.png")
     page.click("text=Looks right, check it")
     page.wait_for_selector(".feedback-refuted", timeout=8000)
@@ -143,9 +182,8 @@ with sync_playwright() as p:
     stroke(page, [(120, 400), (160, 395), (200, 405)])
     page.wait_for_timeout(1500)
     lasso(page, 100, 375, 230, 425)
-    page.click(".check-btn")
-    page.wait_for_selector(".chip input")
-    page.fill(".chip input", "= a^2 + b^2")
+    act(page, "check")
+    page.locator(".chip input").first.fill("= a^2 + b^2")
     check(page.locator(".chip-preview .katex").count() == 1, "typed LaTeX gets a live preview")
     page.click("text=Looks right, check it")
     page.wait_for_selector(".feedback-verified", timeout=8000)
@@ -174,7 +212,7 @@ with sync_playwright() as p:
     check(n == 2, "feedback cards survive reload")
     check(page.locator(".reading-confirmed").count() == 3, "confirmed readings survive reload")
 
-    # A statement written over two lines: one lasso, both lines in the chip, one question from the reasoning model.
+    # A problem written over two lines. Hint: the chip knows it's a problem; one card from the reasoning model.
     js(page, "editor.setCurrentTool('draw')")
     for i in range(4):
         stroke(page, [(120 + i * 40, 520), (145 + i * 40, 510)])
@@ -182,27 +220,29 @@ with sync_playwright() as p:
         stroke(page, [(120 + i * 40, 590), (145 + i * 40, 580)])
     page.wait_for_timeout(1500)
     lasso(page, 100, 490, 340, 615)
-    page.click(".check-btn")
-    page.wait_for_selector(".chip")
+    act(page, "hint")
     check(page.locator(".chip-row", has_text="I read your lines as").count() == 1
           and page.locator(".chip-row", has_text="Next line").count() == 1, "chip shows both lines of the statement")
-    page.click("text=Looks right, check it")
-    page.wait_for_function("editor.getCurrentPageShapes().filter(s => s.type === 'mellow-feedback').length === 3",
-                           timeout=8000)
-    fb = js(page, "return editor.getCurrentPageShapes().filter(s => s.type === 'mellow-feedback').map(s => s.props)")
-    q = fb[-1]
-    check(q["verdict"] == "unverified" and q["message"] == QUESTION, f"the statement gets one question ({q})")
+    check(page.locator("#chip-kind").input_value() == "problem", "the labeller marks the statement as a problem")
+    check(page.locator(".chip-row", has_text="The problem these steps").count() == 0, "a problem needs no problem row")
+    check("Problem: a fixed point" in page.locator(".chip").inner_text(), "chip shows the segment's description")
+    page.screenshot(path=f"{OUT}/p3_chip.png")
+    confirm(page)
+    q = n_cards(page, 3)
+    check(q["verdict"] == "hint" and q["message"] == QUESTION, f"the problem gets one hint ({q})")
     check("Show there is" in q["line"] and "Let" in q["line"], "card holds both lines")
-    sent = check_calls[-1]
-    check(sent["reasoning_model"] and "Show there is" in sent["current"], "the whole statement goes to the reasoning model")
+    sent = assist_calls[-1]
+    check((sent["action"], sent["kind"], sent["problem"]) == ("hint", "problem", None)
+          and "Show there is" in sent["selection"] and "Let" in sent["selection"], f"hint request ({sent})")
+    check(len(js(page, "return Object.keys(editor.getDocumentSettings().meta.structure)")) == 1, "labels kept with the notebook")
 
     # Copying: the card's Copy button, and highlighting card text with the mouse + Ctrl+C.
-    card = page.locator(".feedback", has_text="Which theorem")
-    card.locator(".feedback-copy").click()
+    card_el = page.locator(".feedback", has_text="Which theorem")
+    card_el.locator(".feedback-copy").click()
     clip = page.evaluate("navigator.clipboard.readText()")
-    check(clip.startswith("Question: ") and QUESTION in clip and "\\text{Let }" in clip, "Copy button copies text + LaTeX")
+    check(clip.startswith("Hint: ") and QUESTION in clip and "\\text{Let }" in clip, "Copy button copies text + LaTeX")
     page.evaluate("navigator.clipboard.writeText('')")
-    msg = card.locator(".feedback-msg").bounding_box()
+    msg = card_el.locator(".feedback-msg").bounding_box()
     before = js(page, "return editor.getCurrentPageShapes().filter(s => s.type === 'mellow-feedback').at(-1).x")
     page.mouse.move(msg["x"] + 2, msg["y"] + 4)
     page.mouse.down()
@@ -214,55 +254,69 @@ with sync_playwright() as p:
     after = js(page, "return editor.getCurrentPageShapes().filter(s => s.type === 'mellow-feedback').at(-1).x")
     check("Which theorem" in clip and "f(c)=c" in clip, f"highlighted card text copies, math as LaTeX ({clip!r})")
     check(before == after, "highlighting text doesn't drag the card")
-    page.screenshot(path=f"{OUT}/p2_statement.png")
+    page.screenshot(path=f"{OUT}/p3_hint.png")
+
+    # Answer and Explain on the problem, each one labelled card.
+    lasso(page, 100, 490, 340, 615)
+    act(page, "answer")
+    confirm(page)
+    a = n_cards(page, 4)
+    check(a["verdict"] == "answer" and "✓" in a["message"], "Answer gives the checked proof")
+    check("Answer · AI" in page.locator(".feedback-answer").inner_text(), "answer card is labelled as the AI's")
+    lasso(page, 100, 490, 340, 615)
+    act(page, "explain")
+    confirm(page)
+    e = n_cards(page, 5)
+    check(e["verdict"] == "explain" and "Why:" in e["message"], "Explain walks through the proof")
+    page.screenshot(path=f"{OUT}/p3_answer_explain.png")
+
+    # Check on a problem: nothing to check, and no request.
+    calls = len(check_calls)
+    lasso(page, 100, 490, 340, 615)
+    act(page, "check")
+    confirm(page)
+    c = n_cards(page, 6)
+    check(c["verdict"] == "noted" and "nothing to check" in c["message"] and len(check_calls) == calls,
+          "Check on a problem says there's nothing to check yet")
 
     # Three math lines in one lasso: one card, not three.
     lasso(page, 100, 170, 260, 425)
-    page.click(".check-btn")
-    page.wait_for_selector(".chip")
-    page.click("text=Looks right, check it")
-    page.wait_for_function("editor.getCurrentPageShapes().filter(s => s.type === 'mellow-feedback').length === 4",
-                           timeout=8000)
-    last = js(page, "return editor.getCurrentPageShapes().filter(s => s.type === 'mellow-feedback').at(-1).props")
+    act(page, "check")
+    confirm(page)
+    last = n_cards(page, 7)
     check(last["verdict"] == "refuted" and "Line 2:" in last["message"], f"one card for three lines ({last['message']})")
 
-    # Words read letter by letter are a statement, never refuted with nonsense counterexamples.
+    # Words read letter by letter are a proof step: the AI judges them (never a SymPy refutation), with the
+    # problem above found by its label.
     js(page, "editor.setCurrentTool('draw')")
     for i in range(6):
         stroke(page, [(120 + i * 30, 700), (140 + i * 30, 690)])
     page.wait_for_timeout(2500)
     lasso(page, 100, 670, 320, 725)
-    page.click(".check-btn")
-    page.wait_for_selector(".chip")
-    page.evaluate("document.querySelector('.chip .primary').click()")  # the chip opens below the viewport here
-    page.wait_for_function("editor.getCurrentPageShapes().filter(s => s.type === 'mellow-feedback').length === 5",
-                           timeout=8000)
-    last = js(page, "return editor.getCurrentPageShapes().filter(s => s.type === 'mellow-feedback').at(-1).props")
-    check(last["verdict"] == "unverified" and last["message"] == QUESTION,
-          f"letter-by-letter words get a question, never a refutation ({last['verdict']})")
+    act(page, "check")
+    check("Show there is" in page.locator(".chip-row", has_text="The problem these steps").inner_text().replace("\xa0", " "),
+          "the chip shows the problem found above")
+    page.screenshot(path=f"{OUT}/p3_steps_chip.png")
+    confirm(page)
+    last = n_cards(page, 8)
+    check(last["verdict"] == "ai_check" and last["message"] == JUDGEMENT,
+          f"letter-by-letter words get the AI's judgement, never a refutation ({last['verdict']})")
+    check("Show there is" in (check_calls[-1].get("problem") or ""), "the check request carries the problem")
+    check(page.locator(".feedback-ai_check").inner_text().count("AI, not verified") == 1, "AI check is labelled")
     page.wait_for_timeout(800)
     page.reload()  # readings from before the fix get re-read when the notebook opens
     page.wait_for_function("window.editor !== undefined")
     page.wait_for_timeout(2500)
     check(sum(len(c["strokes"]) == 6 for c in recognize_calls) == 2, "an old letter-by-letter reading is re-read once")
-    page.screenshot(path=f"{OUT}/p2_one_card.png")
 
-    # Hints or answers: the student's choice, saved per browser.
-    check(page.locator("select[aria-label=Feedback]").input_value() == "hint", "hints are the default")
-    page.select_option("select[aria-label=Feedback]", "answer")
-    page.reload()
-    page.wait_for_function("window.editor !== undefined")
-    page.wait_for_timeout(500)
-    check(page.locator("select[aria-label=Feedback]").input_value() == "answer", "the choice survives a reload")
-    lasso(page, 100, 490, 340, 615)
-    page.click(".check-btn")
-    page.wait_for_selector(".chip")
-    page.click("text=Looks right, check it")
-    page.wait_for_selector(".feedback-answer", timeout=8000)
-    check(check_calls[-1]["mode"] == "answer", "the request asks for an answer")
-    check(page.locator(".feedback-answer").inner_text().count("not verified") == 1 and
-          ANSWER.split("$")[0] in page.locator(".feedback-answer").inner_text(), "answer card is labelled unverified")
-    page.screenshot(path=f"{OUT}/p2_answer.png")
+    # Hint on a proof step: the problem comes from the page's labels.
+    lasso(page, 100, 670, 320, 725)
+    act(page, "hint")
+    confirm(page)
+    n_cards(page, 9)
+    sent = assist_calls[-1]
+    check(sent["kind"] == "steps" and "Show there is" in (sent["problem"] or ""), f"hint on a step carries its problem ({sent})")
+    page.screenshot(path=f"{OUT}/p3_step_hint.png")
 
     check(not errors, f"no page errors {errors}")
     browser.close()

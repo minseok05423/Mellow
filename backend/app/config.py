@@ -36,6 +36,7 @@ CAPS = {
     "stroke": int(env("CAP_STROKE", "3000")),
     "read_llm": int(env("CAP_READ_LLM", "200")),
     "reason": int(env("CAP_REASON", "50")),
+    "structure": int(env("CAP_STRUCTURE", "500")),  # page labelling (DECISIONS #21), cheap model
 }
 
 

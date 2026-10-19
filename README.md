@@ -51,7 +51,7 @@ full-screen app, use Share → Add to Home Screen.
   - **Bake-off samples**: lasso one handwritten line → *Save sample* → type the expected
     LaTeX → *Save*. *Samples (n) ⤓* downloads them all as JSON for the recognizer test.
 - **Read + Check (P2)**: lines are read live, shown faintly under each line (*Readings
-  on/off*). Lasso a line → **Check ✓** → confirm or fix what was read → SymPy checks it
+  on/off*). Lasso a line → **Check ✓ / Hint / Answer / Explain with AI** → confirm or fix what was read (and what it is, and its problem) → SymPy or the reasoning model answers
   against the line above → a feedback card appears next to the line: follows,
   counterexample, or a question when it can't be settled algebraically.
 - **Models menu**: pick the handwriting reader, the image reader and the reasoning model.

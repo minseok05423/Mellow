@@ -1,6 +1,6 @@
 // Calls to our backend (via Vite's /api proxy). The browser never talks to an LLM or recognition vendor.
 
-import { choices, feedbackMode } from './models';
+import { choices } from './models';
 
 function userId(): string {
   // shortcut: an anonymous per-browser id for daily caps and logs. Upgrade path: accounts in P4.
@@ -33,8 +33,9 @@ export interface Reading {
 }
 
 export interface CheckResult {
-  // noted: words, no reasoning model available; answer: the AI's direct answer, not verified by SymPy
-  verdict: 'verified' | 'refuted' | 'unverified' | 'noted' | 'answer';
+  // verified / refuted / unverified come from SymPy; noted: nothing to judge (or no model);
+  // ai_check / hint / answer / explain come from the reasoning model and are labelled as the AI's
+  verdict: 'verified' | 'refuted' | 'unverified' | 'noted' | 'ai_check' | 'hint' | 'answer' | 'explain';
   reason: string;
   message: string; // may contain $...$ math
   counterexample: Record<string, string>;
@@ -42,14 +43,29 @@ export interface CheckResult {
   compared_with: string | null;
 }
 
+export type Role = 'problem' | 'definition' | 'claim' | 'proof_step' | 'algebra' | 'concept' | 'note';
+export interface Structure { lines: { role: Role; segment: number }[]; segments: string[] }
+
+export type Kind = 'problem' | 'steps' | 'concept';
+export interface AssistBody {
+  action: 'hint' | 'answer' | 'explain';
+  kind: Kind;
+  selection: string;
+  problem: string | null;
+  work: string[];
+  definitions: string[];
+  confirmed: true;
+}
+
+const reasoner = () => choices.get()?.reasoner;
+
 export const api = {
   recognize: (body: { strokes: { t0: number; pts: number[][] }[]; image?: string; context: string[] }) => {
     const c = choices.get();
     return post<Reading>('/recognize', c ? { ...body, recognizer: c.recognizer, reader_model: c.reader } : body);
   },
-  check: (body: { current: string; context: string[]; confirmed: true }) => {
-    const c = choices.get();
-    const withMode = { ...body, mode: feedbackMode.get() };
-    return post<CheckResult>('/check', c ? { ...withMode, reasoning_model: c.reasoner } : withMode);
-  },
+  check: (body: { current: string; context: string[]; problem: string | null; confirmed: true }) =>
+    post<CheckResult>('/check', { ...body, reasoning_model: reasoner() }),
+  assist: (body: AssistBody) => post<CheckResult>('/assist', { ...body, reasoning_model: reasoner() }),
+  structure: (lines: string[]) => post<Structure>('/structure', { lines, reader_model: choices.get()?.reader }),
 };

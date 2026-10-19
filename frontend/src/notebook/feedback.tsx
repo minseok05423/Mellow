@@ -1,4 +1,4 @@
-// Feedback cards: the board's reply to "Check this step", drawn on the page as an ordinary shape the
+// Feedback cards: the board's reply to Check, Hint, Answer or Explain, drawn on the page as an ordinary shape the
 // student can move or delete (SPEC §4 board objects). Placement is deterministic code, never the LLM.
 
 import katex from 'katex';
@@ -16,13 +16,17 @@ declare module '@tldraw/tlschema' {
 }
 export type FeedbackShape = TLShape<typeof TYPE>;
 
-const ICON: Record<Verdict, string> = { verified: '✓', refuted: '✗', unverified: '?', noted: '•', answer: '✦' };
+const ICON: Record<Verdict, string> = { verified: '✓', refuted: '✗', unverified: '?', noted: '•', ai_check: '◇', hint: '?',
+  answer: '✦', explain: '❋' };
+// Anything from the reasoning model says so, and never reuses SymPy's "Follows" / "Counterexample" (DECISIONS #19).
 const TITLE: Record<Verdict, string> = { verified: 'Follows', refuted: 'Counterexample', unverified: 'Question', noted: 'Noted',
-  answer: 'Answer · AI, not verified' };
+  ai_check: 'Check · AI, not verified', hint: 'Hint', answer: 'Answer · AI', explain: 'Explanation · AI' };
 
-/** Renders text with $...$ math segments via KaTeX. */
+/** Renders text with $...$ math segments via KaTeX. Models also write \(...\), \[...\] and $$...$$
+ * despite the prompt, so those become $...$ first. */
 export function MathText({ text, className }: { text: string; className?: string }) {
   const html = text
+    .replace(/\$\$|\\\(|\\\)|\\\[|\\\]/g, '$')
     .split('$')
     .map((part, i) =>
       i % 2 ? katex.renderToString(part, { throwOnError: false }) : part.replace(/[&<>]/g, (c) => `&#${c.charCodeAt(0)};`))
@@ -41,7 +45,8 @@ export class FeedbackShapeUtil extends ShapeUtil<FeedbackShape> {
   static override props = {
     w: T.number,
     h: T.number,
-    verdict: T.literalEnum('verified', 'refuted', 'unverified', 'noted', 'answer'),
+    // New values only ever get added here, so notebooks saved earlier still load.
+    verdict: T.literalEnum('verified', 'refuted', 'unverified', 'noted', 'answer', 'ai_check', 'hint', 'explain'),
     message: T.string,
     line: T.string,
   };
@@ -113,9 +118,12 @@ export function placeNear(editor: Editor, near: Box, w: number, h: number): { x:
 }
 
 export function addFeedback(editor: Editor, near: Box, line: string, result: CheckResult) {
-  // Height estimate from message length (the card can't measure KaTeX before it exists).
-  const w = 300;
-  const h = 44 + Math.ceil(line.length / 45) * 20 + Math.ceil(result.message.length / 38) * 20;
+  // Height estimate from text length, per line of the message (the card can't measure KaTeX before it exists).
+  const long = result.message.length > 600; // worked answers and explanations get a wider card
+  const w = long ? 380 : 300;
+  const perRow = long ? 50 : 38;
+  const rows = result.message.split('\n').reduce((n, part) => n + Math.max(1, Math.ceil(part.length / perRow)), 0);
+  const h = 44 + Math.ceil(line.length / 45) * 20 + rows * 20;
   const { x, y } = placeNear(editor, near, w, h);
   editor.createShape<FeedbackShape>({
     id: createShapeId(),

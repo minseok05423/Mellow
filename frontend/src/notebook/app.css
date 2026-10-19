@@ -97,12 +97,14 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 .reading-busy, .reading-err { font: italic 10px system-ui, sans-serif; }
 .reading-err { color: #c0392b; }
 
-/* ---- check button + confirm chip (screen space) ---- */
-.check-btn {
-  position: absolute; z-index: 400; pointer-events: all;
-  background: var(--accent); color: #fff; border: 0; border-radius: 999px;
+/* ---- action buttons + confirm chip (screen space) ---- */
+.action-bar { position: absolute; z-index: 400; pointer-events: all; display: flex; gap: 6px; }
+.action-btn {
+  background: var(--accent); color: #fff; border: 0; border-radius: 999px; white-space: nowrap;
   padding: 6px 14px; font-weight: 600; box-shadow: 0 2px 8px rgb(0 0 0 / 0.2);
 }
+.chip-kind { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.chip-kind .chip-label { margin: 0; }
 .chip {
   position: absolute; z-index: 400; pointer-events: all; width: min(380px, calc(100vw - 16px));
   background: #fff; border-radius: 12px; padding: 12px 14px; box-shadow: 0 6px 24px rgb(0 0 0 / 0.22);
@@ -144,6 +146,12 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 .feedback-answer { border-color: #6b4fd8; }
 .feedback-answer .feedback-icon, .feedback-answer .feedback-head { color: #6b4fd8; }
 .feedback-noted .feedback-icon { color: #8a8f98; }
+.feedback-ai_check { border-color: #6b4fd8; }
+.feedback-ai_check .feedback-icon, .feedback-ai_check .feedback-head { color: #6b4fd8; }
+.feedback-hint { border-color: #c47f00; }
+.feedback-hint .feedback-icon { color: #c47f00; }
+.feedback-explain { border-color: #2f7fb5; }
+.feedback-explain .feedback-icon, .feedback-explain .feedback-head { color: #2f7fb5; }
 
 /* ---- models menu ---- */
 .models { position: relative; }

@@ -69,7 +69,7 @@ with sync_playwright() as p:
 
     # Backend through the Vite proxy.
     health = json.loads(urllib.request.urlopen("http://localhost:5173/api/health").read())
-    check(health == {"ok": True}, f"/api/health via proxy -> {health}")
+    check(health.get("ok") is True, f"/api/health via proxy -> {health}")
 
     check(not errors, f"no console errors {errors}")
     b.close()

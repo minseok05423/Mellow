@@ -14,13 +14,15 @@ proofs and analysis). It runs in the browser as a web app / PWA, with iPad + App
 reference device.
 
 Students write their own work on blank, lined or grid pages. When they **select** part of it,
-an assistant responds on the page next to their work. Today it can **check** the selection:
+they pick **Check**, **Hint**, **Answer** or **Explain with AI**, and the reply appears on the
+page next to their work:
 
 - **Algebra** is checked by SymPy, which gives a proven verdict: "Follows" or a counterexample.
-- **Proof steps in words** go to an LLM, the reasoning model. By default it asks one guiding
-  question. Students can switch it to give direct answers instead.
+- **Proof steps in words** go to an LLM, the reasoning model, labelled as the AI's.
+- **Hint, Answer and Explain** on a problem build on one proof the model writes once, with its
+  algebra checked by SymPy, kept on the server.
 
-Later phases add explain/animate, hints, interactive widgets, accounts and sync, PDFs, and
+Later phases add animated explanations, interactive widgets, accounts and sync, PDFs, and
 handwriting search.
 
 **Core principle:** the student does the generative work; the board responds to *their*
@@ -71,6 +73,9 @@ These are kept even in "minimal" mode:
    - copy/paste
    - proof feedback from the reasoning model
    - the Hints / Answers switch
+7. **P3a, structure + four actions** (2026-10-19): page labels (roles + segments), the
+   Check / Hint / Answer / Explain menu replacing the switch, and solve-once proofs checked by
+   SymPy. Built and tested, including a real DeepSeek smoke test.
 
 ---
 
@@ -96,34 +101,43 @@ These are kept even in "minimal" mode:
   fraction, are merged into one line.
 - **Live reading:** about 1 s after you stop writing, each new line is read and shown faintly
   under it. Readings can be toggled with *Readings on/off*.
-- **Check ✓:** lasso one or more lines, then press **Check ✓**.
-  - The **confirm box** lists every selected line's reading, plus the line above, for you to
-    confirm or fix (✎ opens a LaTeX field with a live preview).
+- **Four actions:** lasso one or more lines, then press **Check ✓**, **Hint**, **Answer** or
+  **Explain with AI** (P3a).
+  - The **confirm box** lists every selected line's reading for you to confirm or fix (✎ opens a
+    LaTeX field with a live preview), plus **what the selection is** (proof steps, a problem or
+    a concept) and, for steps, **the problem they work on**. Both come from the page's labels
+    and can be changed. Check also shows the line above.
   - Only confirmed readings are ever judged.
-- **One Check gives one card.**
-  - If the selection contains words, all its lines are treated as one block and sent to the
-    reasoning model.
+- **Page labels:** when an action is pressed, a cheap model labels every line on the page
+  (problem, definition, claim, proof step, algebra, concept, note) and groups lines into
+  described segments. They're kept with the notebook until the page's readings change.
+- **Check gives one card.**
+  - On a problem or a concept: "nothing to check", with no request.
+  - If the selection contains words, all its lines are treated as one block, and the reasoning
+    model says holds / gap / error ("Check · AI, not verified"). It never gives the fix.
   - If it's all algebra, each line is checked by SymPy as a step. The results are combined:
     the most serious verdict, with each line's problem listed ("Line 2: …").
 - **Card types:**
   - ✓ **Follows**: SymPy proved the step follows from the line above.
   - ✗ **Counterexample**: SymPy found values where the step fails, e.g. "Try a = 1, b = 1: the
     line above gives 4, but yours gives 2."
-  - ? **Question**: algebra SymPy can't settle (template question), or proof feedback in Hints
-    mode.
-  - ✦ **Answer · AI, not verified**: proof feedback in Answers mode. It isn't checked by SymPy
-    and can be wrong.
-  - • **Noted**: words, when no reasoning model is available.
+  - ? **Question**: algebra SymPy can't settle (template question).
+  - ◇ **Check · AI, not verified**: the model's holds / gap / error on steps in words.
+  - ? **Hint**: one question toward the next step.
+  - ✦ **Answer · AI**: the proof (steps whose algebra SymPy checked are marked ✓), whether the
+    selected steps hold and how to fix them, or a definition.
+  - ❋ **Explanation · AI**: the proof with why each step holds, what the selected steps do, or a
+    concept explained with an example.
+  - • **Noted**: nothing to check, no reasoning model available, or no checked proof.
 - **Cards** are ordinary page objects. Code places them in free space next to the selection
   (the LLM never picks positions). You can move or delete them, and they're saved with the
   notebook.
-- **Hints / Answers switch** (toolbar, saved per browser, Hints by default). It only affects
-  lines with words:
-  - **Hints:** one short question about the weakest point. It never says right or wrong, and
-    never introduces a theorem the student hasn't written.
-  - **Answers:** says plainly whether the written step holds and how to fix it. For a problem
-    statement alone, it writes the proof. A theorem used without naming it or checking its
-    hypotheses counts as a gap.
+- **Solve once (Hint / Answer / Explain on a problem):** the model writes the proof as steps,
+  each algebra claim tagged identity or derived and checked by SymPy; a counterexample goes back
+  to the model for one retry. The checked proof is cached on the server, keyed by the problem, so
+  only the first press is slow (20–70 s with DeepSeek V4 Pro at high effort). Hints use it as a
+  hidden reference and follow the student's own route; it reaches the browser only through
+  Answer or Explain. If no proof passes, Hint asks without one, and Answer/Explain say so.
 - **Copy and paste:**
   - each card has a **Copy** button (text, with math as LaTeX)
   - card text can be highlighted with the mouse and copied with Ctrl/Cmd+C; math pastes as LaTeX
@@ -166,15 +180,15 @@ Drag ε and watch δ respond. It becomes the first board widget in P3.
    the notebook opens.
 
 ### Checking (`POST /check`)
-**Request:** the confirmed line, the confirmed lines above, `confirmed: true` (required), the
-reasoning model, and the mode (`hint` / `answer`).
+**Request:** the confirmed line, the confirmed lines above, the confirmed problem (if known),
+`confirmed: true` (required), and the reasoning model.
 
 **A line counts as words** if it contains words other than joining words (so, thus, hence,
 then, therefore, and, i.e., which, gives, implies), or a run of 3+ letters.
-- Words go to the reasoning model (`structured_call`, below). Hints run at medium thinking
-  effort, Answers at high.
-- In Hints mode, a reply containing "correct", "wrong" or "well done" fails validation and is
-  retried once.
+- Words go to the reasoning model (`structured_call`, below) at high thinking effort, which
+  returns holds / gap / error with a reason.
+- Hints (`/assist`) run at medium effort; a hint containing "correct", "wrong" or "well done"
+  fails validation and is retried once.
 - Word lines are never used as the line an algebra step is checked against.
 
 **Algebra goes to SymPy:**
@@ -248,31 +262,34 @@ frontend/          Vite 8 + React 19 + TypeScript + tldraw 5.5 + KaTeX
   src/notebook/
     main.tsx        hash router: library ↔ notebook
     Library.tsx     notebook list; library.ts stores the index
-    Notebook.tsx    tldraw setup, toolbar, top bar (pages, paper, readings, Hints/Answers, Models, samples)
+    Notebook.tsx    tldraw setup, toolbar, top bar (pages, paper, readings, Models, samples)
     pages.tsx       A4 page shape, paper styles, page stack, camera limits
     ink.ts          raw stroke recorder (meta.ink)
     lasso.ts        lasso tool (75%-inside rule)
     lines.ts        groups strokes into lines
     readings.ts     live reading, readings store, re-read of letter-by-letter readings
-    CheckUI.tsx     readings under lines, Check button, confirm box, combining results
+    CheckUI.tsx     readings under lines, the four action buttons, confirm box, combining results
+    structure.ts    page labels (roles + segments) and finding an action's context
     feedback.tsx    feedback card shape, placement, Copy button
-    models.ts       model catalog/choices, Hints/Answers setting
+    models.ts       model catalog/choices
     samples.ts      bake-off sample recording/download
     api.ts          calls to the backend (/api proxy)
   tests/            Playwright end-to-end tests (Python): test_notebook, test_check, test_models, test_epsdelta
 
 backend/           FastAPI + Pydantic + SymPy + SQLite
   app/
-    main.py         routes: /health, /models, /recognize, /check (+ /scene, /explain stubs → 501)
+    main.py         routes: /health, /models, /recognize, /structure, /check, /assist (+ /scene stub → 501)
     config.py       settings from .env, daily caps, which models are configured
     llm.py          structured_call, DeepSeek + Claude providers, streaming
     recognize.py    MyScript, Mathpix, LLM fallback, the hybrid
     verify.py       SymPy checking (process + timeout), word detection
-    check.py        /check: SymPy vs reasoning model, hint/answer prompts, templates
+    check.py        /check: SymPy for algebra, the AI's holds / gap / error for words, templates
+    assist.py       /assist: solve + SymPy-verify once, then hint / answer / explain
+    structure.py    /structure: page labels from a cheap model
     catalog.py      model catalog with prices
     store.py        SQLite: request log, cache, quotas
   bakeoff/run.py    recognizer bake-off over recorded samples
-  tests/            pytest suite (63 tests)
+  tests/            pytest suite (71 tests)
 ```
 
 ---
@@ -305,7 +322,7 @@ and word lines get "Noted".
 
 **Tests:**
 ```bash
-cd backend && .venv/bin/python -m pytest -q                       # 63 pass, never call real APIs
+cd backend && .venv/bin/python -m pytest -q                       # 71 pass, never call real APIs
 python3 -m venv ~/.venvs/mellow-tests                             # one-time Playwright setup
 ~/.venvs/mellow-tests/bin/pip install -r frontend/tests/requirements.txt
 ~/.venvs/mellow-tests/bin/playwright install chromium
@@ -319,7 +336,7 @@ All four end-to-end suites pass:
   - multi-line statements and one card per Check
   - letter-by-letter words
   - copy and paste
-  - Hints / Answers
+  - the four actions, page labels, problem lookup, Check on a problem
 - **test_models:** the Models menu
 - **test_epsdelta:** the M1 demo
 
@@ -351,9 +368,11 @@ cd backend && .venv/bin/python -m bakeoff.run ~/Downloads/mellow-samples-*.json
 17. **Proof steps in words:** they get a question from the reasoning model, and are never used
     as the line algebra is checked against. Lassoed lines give one card. Words read as single
     letters count as words.
-18. **Hints or Answers:** the student chooses (default Hints). Answers are labelled "AI, not
-    verified" and never reuse SymPy's card types. This relaxes SPEC §4's "never verdicts" rule
-    at the user's request.
+18. **Hints or Answers:** a toolbar switch. Replaced by #19.
+19. **Four selection actions** (Check, Hint, Answer, Explain with AI) replace the switch.
+20. **A problem is solved once,** its algebra checked by SymPy (identities on their own, derived
+    claims against earlier ones), and reused by Hint, Answer and Explain. Lean left out for now.
+21. **Lines get roles and segments;** context is found by structure, not RAG (RAG waits for P5).
 
 ---
 
@@ -370,13 +389,17 @@ These are marked `shortcut:` in the code.
 - **Template questions:** algebra SymPy can't settle still gets them in both modes. Upgrade
   path: the reasoning model words them in P3.
 - **Not streamed yet:** proof questions and answers show "Checking…" for about 5–10 s.
-- **Unverified answers:** in Answers mode, the model's judgement can be wrong. Hints can still
-  give a fairly strong nudge (e.g. pointing at f(x) − x). Tuning both belongs in the planned
-  reasoning test.
+- **Unverified logic:** SymPy checks only the algebra in a proof; logic steps (quantifiers,
+  cases, named theorems) are marked by having no ✓. The AI's Check and Answer on steps can be
+  wrong. Tuning belongs in the planned reasoning test.
+- **Labels per page, on demand:** a proof continued on the next page doesn't find its problem
+  (type it in the confirm box). Upgrade path: label on pause, across pages.
+- **First solve is slow:** 20–70 s. Upgrade path: solve in the background once a problem is
+  labelled, or stream progress.
 
 **Accounts and identity:**
 - An **anonymous per-browser id** stands in for accounts until P4.
-- Model choices and the Hints/Answers setting are saved per browser.
+- Model choices are saved per browser.
 
 **Not checked on real hardware or live services:**
 - MyScript's request shape was confirmed with real keys in smoke tests. The bake-off hasn't
@@ -402,11 +425,6 @@ These are marked `shortcut:` in the code.
   - Recognizer vendor pricing.
 
 ### Build order (SPEC §9)
-- **P3a Structure + four actions** (DECISIONS #19–21, designed 2026-10-19):
-  - line roles + segments, labelled by a cheap model
-  - selection menu: Check / Hint / Answer / Explain, replacing the Hints/Answers switch
-  - a problem is solved once, its algebra checked by SymPy, and the answer stored server-side
-  - Explain as a text card
 - **P3b Explain / Visualize:**
   - animated explanations played from scene JSON
   - the ε–δ widget on the page

@@ -1,9 +1,9 @@
-"""/check: SymPy decides; the student sees a verdict only when SymPy proved it (SPEC §4).
+"""/check: is what the student wrote sound? (SPEC §4, DECISIONS #19)
 
-Algebra goes to SymPy. Proof steps in words go to the reasoning model. By default it may only ask a
-question (SPEC §4); a student who chose "Answers" gets its direct answer, labelled unverified.
+Algebra goes to SymPy, whose verdicts are proven. Proof steps in words go to the reasoning model, whose
+holds / gap / error is labelled "AI, not verified". Check never gives the fix or the next step.
 shortcut: feedback on SymPy's `unverified` algebra comes from templates. Upgrade path: the reasoning
-model words those questions too once /hint lands in P3.
+model words those questions too.
 """
 import hashlib
 import re
@@ -21,12 +21,12 @@ class CheckRequest(BaseModel):
     # Confirm-before-judge: the client must only send readings the student confirmed.
     confirmed: Literal[True]
     reasoning_model: str | None = None  # the student's choice (Models menu); the route validates it
-    # The student's choice for word lines: a guiding question, or a direct (unverified) answer.
-    mode: Literal["hint", "answer"] = "hint"
+    problem: str | None = Field(None, max_length=4000)  # the confirmed problem these steps work on, if known
 
 
 class CheckResponse(BaseModel):
-    verdict: Literal["verified", "refuted", "unverified", "noted", "answer"]
+    # ai_check / hint / answer / explain come from the reasoning model, never from SymPy
+    verdict: Literal["verified", "refuted", "unverified", "noted", "ai_check", "hint", "answer", "explain"]
     reason: str
     message: str
     counterexample: dict[str, str] = {}
@@ -43,82 +43,52 @@ QUESTIONS = {
 DEFAULT_QUESTION = "I couldn't settle this algebraically. Can you justify the step from the line above?"
 
 
-PROOF_SYSTEM = """You tutor a first-year university proofs course. A student selected part of their
-handwritten work in a notebook and asked you to check it. Their lines are LaTeX they have confirmed.
+JUDGE_SYSTEM = """You tutor a first-year university proofs course. A student selected steps of their handwritten
+proof in a notebook and asked you to check them. Their lines are LaTeX they have confirmed.
 
-Decide what the selection is: the problem statement they are about to prove, or steps of their proof.
-
-Rules:
-- Never say whether the work is correct, wrong or complete. Never give the answer, the next step or
-  a proof. An algebra checker gives verdicts; you only ask.
-- Don't introduce a construction, function or theorem the student hasn't written; let them find it.
-- Reply with ONE short question (at most two sentences, under 60 words) about the most important thing:
-  - a problem statement: what the goal says precisely, or what kind of argument could reach it;
-  - proof steps: the weakest justification, a hidden assumption, a missing case, or a quantifier.
-  If the steps look solid, ask the student to name the justification for the key step.
-- Write math as $...$ (LaTeX)."""
-
-ANSWER_SYSTEM = """You tutor a first-year university proofs course. A student selected part of their
-handwritten work in a notebook and asked for a direct answer. Their lines are LaTeX they have confirmed.
-
-Decide what the selection is: a problem statement, or steps of their proof.
-- A problem statement: give a concise, complete proof (under 150 words).
-- Proof steps: say plainly in the first sentence whether the reasoning holds. If it doesn't, name the
-  exact error or gap and show how to fix it. If it does, name the key justification. Under 120 words.
-Judge only what is written. A step whose justification isn't written (a theorem not named, or its
-hypotheses not checked) does not hold yet: call it a gap and say what is missing.
+Judge only whether what is written holds. Never give the next step, the fix or a proof.
+- verdict: "holds" if every selected step follows; "gap" if a justification is missing (a theorem not named,
+  its hypotheses not checked, a missing case); "error" if a step is false or doesn't follow.
+- reason: one or two sentences, under 60 words. For a gap or an error, point at the exact step and what is
+  wrong, without fixing it. For holds, name the key justification.
 Write math as $...$ (LaTeX)."""
 
-PROMPT_ID = {mode: hashlib.sha256(p.encode()).hexdigest()[:12]  # a prompt edit never serves old answers
-             for mode, p in (("hint", PROOF_SYSTEM), ("answer", ANSWER_SYSTEM))}
+PROMPT_ID = hashlib.sha256(JUDGE_SYSTEM.encode()).hexdigest()[:12]  # a prompt edit never serves old answers
 VERDICT_WORDS = re.compile(r"\b(correct|incorrect|wrong|well done|good job|great job)\b", re.I)
 
 
-class ProofFeedback(BaseModel):
-    kind: Literal["statement", "steps"]
-    question: str
+class StepJudgement(BaseModel):
+    verdict: Literal["holds", "gap", "error"]
+    reason: str
 
 
-def _proof_check(f: ProofFeedback) -> list[str]:
-    errors = []
-    if "?" not in f.question:
-        errors.append("question must be a question (contain '?')")
-    if len(f.question) > 400:
-        errors.append("question must be under 400 characters")
-    if VERDICT_WORDS.search(f.question):
-        errors.append("no verdicts: don't say correct, wrong or well done; only ask")
-    return errors
+def _judge_check(j: StepJudgement) -> list[str]:
+    return [] if 0 < len(j.reason) <= 600 else ["reason must be 1-600 characters"]
 
 
-class ProofAnswer(BaseModel):
-    kind: Literal["statement", "steps"]
-    answer: str
+JUDGE_LABEL = {"holds": "Holds.", "gap": "Gap:", "error": "Error:"}
 
 
-def _answer_check(a: ProofAnswer) -> list[str]:
-    return [] if 0 < len(a.answer) <= 1500 else ["answer must be 1-1500 characters"]
-
-
-def proof_feedback(req: CheckRequest, user: str, model: str) -> CheckResponse:
-    above = "\n".join(req.context) or "(none)"
-    prompt = f"Confirmed lines above the selection, oldest first:\n{above}\n\nSelected:\n{req.current}"
-    hint = req.mode == "hint"
+def judge_steps(req: CheckRequest, user: str, model: str) -> CheckResponse:
+    parts = [f"Problem:\n{req.problem}"] if req.problem else []
+    parts.append("Confirmed lines above the selection, oldest first:\n" + ("\n".join(req.context) or "(none)"))
+    parts.append(f"Selected:\n{req.current}")
     out = llm.structured_call(
-        endpoint="check", user=user, cost_class="reason", model=model,
-        system=PROOF_SYSTEM if hint else ANSWER_SYSTEM, content=[{"type": "text", "text": prompt}],
-        schema=ProofFeedback if hint else ProofAnswer, semantic_check=_proof_check if hint else _answer_check,
-        cache_input={"current": req.current, "context": req.context, "prompt": PROMPT_ID[req.mode]},
-        # Answers are stated as fact to the student, so the model thinks harder before giving one.
-        effort="medium" if hint else "high", max_tokens=8192,
+        endpoint="check", user=user, cost_class="reason", model=model, system=JUDGE_SYSTEM,
+        content=[{"type": "text", "text": "\n\n".join(parts)}], schema=StepJudgement, semantic_check=_judge_check,
+        cache_input={"parts": parts, "prompt": PROMPT_ID},
+        # A verdict is stated to the student, so the model thinks harder before giving one.
+        effort="high", max_tokens=8192,
     )
-    if hint:
-        return CheckResponse(verdict="unverified", reason=f"proof_{out.kind}", message=out.question)
-    # Not a SymPy verdict: the card labels it as the AI's unverified answer (DECISIONS #18).
-    return CheckResponse(verdict="answer", reason=f"proof_{out.kind}", message=out.answer)
+    # Not a SymPy verdict: the card labels it "AI, not verified" and never reuses SymPy's card types (DECISIONS #19).
+    return CheckResponse(verdict="ai_check", reason=f"judge_{out.verdict}",
+                         message=f"{JUDGE_LABEL[out.verdict]} {out.reason}")
 
 
 NOTED = "This is written in words, so there's nothing to calculate. I've noted it; the lines below can build on it."
-def _assignment(env: dict[str, str]) -> str:
+
+
+def assignment(env: dict[str, str]) -> str:
     return ", ".join(f"{k} = {v}" for k, v in env.items())
 
 
@@ -127,16 +97,16 @@ def check(req: CheckRequest, user: str) -> CheckResponse:
         # Words ("Let f be continuous...", "hence p is even") aren't algebra SymPy can judge.
         model = req.reasoning_model or config.REASONING_MODEL
         if config.llm_configured(model):
-            return proof_feedback(req, user, model)
+            return judge_steps(req, user, model)
         return CheckResponse(verdict="noted", reason="prose", message=NOTED)  # no reasoning model available
     r = check_step(req.current, req.context)
     if r.verdict == "verified":
         msg = "This follows from the line above."
     elif r.verdict == "refuted" and r.reason == "rewrite_differs":
-        msg = (f"Try ${_assignment(r.counterexample)}$: the line above gives ${r.values['before']}$, "
+        msg = (f"Try ${assignment(r.counterexample)}$: the line above gives ${r.values['before']}$, "
                f"but yours gives ${r.values['after']}$.")
     elif r.verdict == "refuted":
-        msg = f"${_assignment(r.counterexample)}$ satisfies ${r.compared_with}$, but not your line."
+        msg = f"${assignment(r.counterexample)}$ satisfies ${r.compared_with}$, but not your line."
     else:
         msg = QUESTIONS.get(r.reason, DEFAULT_QUESTION)
     return CheckResponse(verdict=r.verdict, reason=r.reason, message=msg, counterexample=r.counterexample,

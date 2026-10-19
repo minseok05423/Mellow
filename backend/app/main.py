@@ -5,7 +5,8 @@ import time
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
-from . import catalog, config, llm, recognize, store
+from . import catalog, config, llm, recognize, store, structure
+from .assist import AssistRequest, assist
 from .check import CheckRequest, CheckResponse, check
 
 app = FastAPI(title="Mellow")
@@ -61,10 +62,43 @@ def check_route(req: CheckRequest, x_mellow_user: str | None = Header(None)):
     except llm.LLMError as e:
         raise HTTPException(502, str(e))
     # Logged like LLM calls: this is the start of the learning log (SPEC §5).
-    by_llm = res.reason.startswith("proof_")  # the LLM call itself is logged by structured_call too
+    by_llm = res.reason.startswith("judge_")  # the LLM call itself is logged by structured_call too
     store.log(user=user, endpoint="check", provider="llm" if by_llm else "sympy",
               model=(req.reasoning_model or config.REASONING_MODEL) if by_llm else "sympy", request=req.model_dump(),
               response=res.model_dump(), valid=1, retries=0, cached=0, latency_ms=int((time.time() - t) * 1000))
+    return res
+
+
+@app.post("/structure", response_model=structure.Structure)
+def structure_route(req: structure.StructureRequest, x_mellow_user: str | None = Header(None)):
+    user = user_id(x_mellow_user)
+    model = req.reader_model or config.FALLBACK_READER_MODEL  # labelling is a cheap model's job
+    if not catalog.model_available(model):
+        raise HTTPException(503, f"no model available for labelling ({model})")
+    try:
+        return structure.label(req, user, model)
+    except llm.QuotaExceeded as e:
+        raise HTTPException(429, str(e))
+    except llm.LLMError as e:
+        raise HTTPException(502, str(e))
+
+
+@app.post("/assist", response_model=CheckResponse)
+def assist_route(req: AssistRequest, x_mellow_user: str | None = Header(None)):
+    """Hint, Answer and Explain (SPEC §4). Every LLM call inside is logged by structured_call."""
+    user = user_id(x_mellow_user)
+    if req.reasoning_model and not catalog.model_available(req.reasoning_model):
+        raise HTTPException(400, f"reasoning model {req.reasoning_model!r} isn't available")
+    t = time.time()
+    try:
+        res = assist(req, user)
+    except llm.QuotaExceeded as e:
+        raise HTTPException(429, str(e))
+    except llm.LLMError as e:
+        raise HTTPException(502, str(e))
+    store.log(user=user, endpoint="assist", provider="llm", model=req.reasoning_model or config.REASONING_MODEL,
+              request=req.model_dump(), response=res.model_dump(), valid=1, retries=0, cached=0,
+              latency_ms=int((time.time() - t) * 1000))
     return res
 
 
@@ -72,16 +106,6 @@ class SceneRequest(BaseModel):
     topic: str
 
 
-class ExplainRequest(BaseModel):
-    step_id: str
-    question: str
-
-
 @app.post("/scene")
 def scene(req: SceneRequest):
-    raise HTTPException(501, "not implemented (P3)")
-
-
-@app.post("/explain")
-def explain(req: ExplainRequest):
-    raise HTTPException(501, "not implemented (P3)")
+    raise HTTPException(501, "not implemented (P3b)")

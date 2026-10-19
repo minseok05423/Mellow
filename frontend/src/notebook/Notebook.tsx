@@ -28,7 +28,7 @@ import { CheckUI, ReadingsOverlay } from './CheckUI';
 import { FeedbackShapeUtil } from './feedback';
 import { recordInk } from './ink';
 import {
-  Catalog, Choices, FeedbackMode, ModelOption, catalog, choices, feedbackMode, loadModels, setChoice, setFeedbackMode,
+  Catalog, Choices, ModelOption, catalog, choices, loadModels, setChoice,
 } from './models';
 import { showReadings, startLiveReading } from './readings';
 import { LassoOverlayUtil, LassoSelectTool } from './lasso';
@@ -78,8 +78,8 @@ function Toolbar() {
 
 const MODEL_ROWS: { kind: keyof Choices; group: keyof Omit<Catalog, 'defaults'>; label: string; hint: string }[] = [
   { kind: 'recognizer', group: 'recognizers', label: 'Handwriting reader', hint: 'Reads your strokes, live' },
-  { kind: 'reader', group: 'readers', label: 'Image reader (fallback)', hint: 'Re-reads prose and unsure lines' },
-  { kind: 'reasoner', group: 'reasoners', label: 'Reasoning', hint: 'Hints and explanations (P3)' },
+  { kind: 'reader', group: 'readers', label: 'Image reader (fallback)', hint: 'Re-reads prose and unsure lines; labels the page' },
+  { kind: 'reasoner', group: 'reasoners', label: 'Reasoning', hint: 'Check, Hint, Answer and Explain' },
 ];
 
 function optionLabel(o: ModelOption) {
@@ -129,7 +129,6 @@ function TopBar({ nb }: { nb: NotebookMeta }) {
   const [sampleCount, setSampleCount] = useState(0);
   const [status, setStatus] = useState('');
   const readingsOn = useValue(showReadings);
-  const mode = useValue(feedbackMode);
 
   useEffect(() => { countSamples().then(setSampleCount); }, []);
 
@@ -170,11 +169,6 @@ function TopBar({ nb }: { nb: NotebookMeta }) {
         title="Show what the board reads under each line">
         Readings {readingsOn ? 'on' : 'off'}
       </button>
-      <select aria-label="Feedback" value={mode} onChange={(e) => setFeedbackMode(e.target.value as FeedbackMode)}
-        title="For proof steps in words: a guiding question, or the AI's direct answer (not verified)">
-        <option value="hint">Hints</option>
-        <option value="answer">Answers</option>
-      </select>
       <ModelsMenu />
       <span className="sep" />
       {/* Bake-off tooling (SPEC §7): record handwritten lines with their expected reading. */}

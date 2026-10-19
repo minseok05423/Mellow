@@ -171,8 +171,12 @@ a concept (SPEC §4 table).
 
 Hints written without a solution are blind: the model asks about the "weakest point"
 without knowing where the proof goes. So the reasoning model first writes the proof as
-structured steps (prose plus the LaTeX claim, if any). SymPy checks each algebra claim
-against the previous one; a counterexample goes back to the model for one retry, and an
+structured steps (prose plus the LaTeX claim, if any, tagged identity, derived or none).
+SymPy checks an identity on its own (left side against right side, for all values) and a
+derived claim against the earlier claims; untagged claims (new definitions like p = 2k)
+are never checked, since they don't follow by algebra. The first real test showed why the
+tag is needed: a proof made only of identities had nothing checked when each claim was
+compared with the one before it. A counterexample goes back to the model for one retry, and an
 answer that still fails is never used. The checked answer is stored server-side, keyed by
 the problem, and only sent to the browser when the student asks for it. All three actions
 build on the same answer, so they can't contradict each other and only the first press
@@ -185,8 +189,12 @@ often doesn't compile, and running it needs a sandboxed service.
 
 Each line's reading gains a role (problem, definition, claim, proof step, algebra,
 concept, note), and lines are grouped into segments with a one-line description. A cheap
-model labels a segment per call when the student pauses; labels are keyed by line key, so
-an edit invalidates them like it invalidates readings. An action's context is then a
+model labels the whole page in one call when an action is pressed, while the student looks
+over the confirm box; labels are stored per page with the readings they were made from, so
+any edit means a relabel (cached server-side by text). The confirm box shows what the
+selection is and its problem, and the student can change both. Context lines (work,
+definitions) may be unconfirmed readings for Hint and Explain, but an Answer, which is a
+verdict, only uses confirmed ones. An action's context is then a
 lookup (the segment's problem, its steps, earlier definitions) instead of "the 8 lines
 above". RAG is deferred: a notebook's text fits in the prompt, structure finds the right
 lines exactly where embedding search is fuzzy, and the model already knows intro proofs.

@@ -73,8 +73,8 @@ concept), which comes from the document structure below.
 
 **Solve once, reuse (DECISIONS #20):** for a problem, Hint, Answer and Explain all
 use one stored answer: the reasoning model writes the proof as structured steps,
-SymPy checks every algebra claim (a counterexample goes back to the model for one
-retry), and the result is stored server-side, keyed by the problem. Each step is
+SymPy checks every algebra claim (an identity on its own, a derived claim against
+the earlier ones; a counterexample goes back to the model for one retry), and the result is stored server-side, keyed by the problem. Each step is
 marked "✓ checked by SymPy" or "not machine-checked". The answer never reaches the
 browser until the student asks for it. A Hint treats the stored answer as a
 reference, not a target: a different valid route gets hints along that route. If
@@ -84,8 +84,8 @@ behind it, and Answer / Explain say so.
 **Document structure (DECISIONS #21):** on top of the readings, each line gets a
 role (problem | definition | claim | proof step | algebra | concept | note) and
 lines are grouped into segments with a one-line description ("Problem 3: prove √2
-is irrational"). A cheap model labels a whole segment per call, when the student
-pauses. Context for an action is found by structure: the segment's problem, its
+is irrational"). A cheap model labels the page in one call when an action is
+pressed (cached until the page's readings change). Context for an action is found by structure: the segment's problem, its
 steps so far, and definitions written earlier on the page. The problem an action
 is built from is shown in the confirm box, so a wrong label is fixed before
 anything is judged. Retrieval (RAG) over course material waits for P5's PDFs.
@@ -120,7 +120,7 @@ we have one for. Starting widget library: ε–δ continuity (exists as M1).
 2. **Confirm chip:** "I read: 2q² = p²  ✓ ✎". The student confirms or fixes the
    reading before anything is judged. Not optional: a misread must never become a
    false "wrong". Live readings make this a glance rather than a wait.
-3. The action endpoint (`/check`, `/hint`, `/answer`, `/explain`, `/visualize`) runs.
+3. The action endpoint (`/check`; `/assist` for Hint, Answer and Explain; `/visualize`) runs.
    - SymPy verifies algebra.
    - Anything SymPy can't verify that states a judgement is labelled "AI, not
      verified" and never reuses SymPy's "Follows" / "Counterexample".
@@ -173,7 +173,7 @@ we have one for. Starting widget library: ε–δ continuity (exists as M1).
   pen events, alongside tldraw, and link it to the tldraw shape by id.
 
 ## 7. LLM handling (v1 rules kept, extended)
-- **Endpoints:** `/recognize`, `/check`, `/explain`, `/hint`, `/visualize`, `/scene`.
+- **Endpoints:** `/recognize`, `/structure`, `/check`, `/assist` (hint/answer/explain), `/visualize`, `/scene`.
   Each has its own system prompt and schema.
 - **`/recognize` is hybrid:**
   - The backend calls the stroke recognizer with the line's strokes; the vendor
@@ -194,7 +194,8 @@ we have one for. Starting widget library: ε–δ continuity (exists as M1).
 - **Per-user daily caps,** split by cost class: [default]
   - stroke recognitions: generous, since they're cheap and frequent
   - LLM fallback reads: 200
-  - reasoning calls (check/explain/hint/visualize): 50
+  - reasoning calls (check/solve/hint/answer/explain/visualize): 50
+  - page labelling: 500
 - **Log:** every request, response, validation result and retry count, including
   which reader produced each reading.
 - **Bake-off before the assistant is built:**

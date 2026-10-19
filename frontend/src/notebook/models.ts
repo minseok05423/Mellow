@@ -51,14 +51,3 @@ export function setChoice(kind: keyof Choices, id: string) {
   choices.set(next);
   localStorage.setItem(KEY, JSON.stringify(next));
 }
-
-/** What the student wants for proof steps in words: a guiding question, or the AI's direct answer. */
-export type FeedbackMode = 'hint' | 'answer';
-const MODE_KEY = 'mellow.feedback.v1';
-const savedMode = (() => { try { return localStorage.getItem(MODE_KEY); } catch { return null; } })();
-export const feedbackMode = atom<FeedbackMode>('feedback mode', savedMode === 'answer' ? 'answer' : 'hint');
-
-export function setFeedbackMode(mode: FeedbackMode) {
-  feedbackMode.set(mode);
-  try { localStorage.setItem(MODE_KEY, mode); } catch { /* not saved; still applies this session */ }
-}
