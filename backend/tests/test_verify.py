@@ -73,3 +73,9 @@ def test_a_step_that_only_substitutes_is_checked_on_its_own():
     assert check_step("q = 2l", ["p = 2k"]).verdict == "unverified"
     assert check_step("p^2 = 2q^2", ["p = 2k"]).verdict == "unverified"
     assert check_step("y = 5", ["x = 3"]).verdict == "unverified"
+
+
+def test_identities_with_square_roots_are_only_tested_where_the_roots_are_real():
+    # Real DeepSeek proof of AM-GM: "refuted" at a = b = -1, where sqrt(a) isn't real.
+    assert check_step("= a - 2\\sqrt{ab} + b", ["(\\sqrt{a}-\\sqrt{b})^2"]).verdict != "refuted"
+    assert check_step("= a + b", ["(\\sqrt{a}-\\sqrt{b})^2"]).verdict == "refuted"  # still caught when wrong

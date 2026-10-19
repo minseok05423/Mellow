@@ -56,6 +56,7 @@ export interface AssistBody {
   problem: string | null;
   work: string[];
   definitions: string[];
+  style?: 'steps' | 'picture'; // Explain on a problem or concept: equations, or a picture (DECISIONS #24)
   confirmed: true;
 }
 

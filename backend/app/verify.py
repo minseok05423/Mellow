@@ -15,7 +15,7 @@ import multiprocessing as mp
 import re
 from dataclasses import asdict, dataclass, field
 
-mp.set_forkserver_preload(["sympy", "sympy.parsing.latex", "app.verify"])
+mp.set_forkserver_preload(["sympy", "sympy.parsing.latex", "app.verify", "app.geometry"])
 
 TIMEOUT_S = 3.0
 SMALL_VALUES = (1, 2, 3, 0, -1, -2, -3)  # small positives first: friendlier counterexamples
@@ -103,11 +103,15 @@ def _fmt(v) -> str:
 
 
 def _search_counterexample(a, b, syms):
-    """Small-integer assignment where a != b, or None."""
-    from sympy import simplify
+    """Small-integer assignment where a != b, or None. Points where a square root (or other fractional power)
+    gets a negative number are skipped: (sqrt(a)-sqrt(b))^2 = a - 2 sqrt(ab) + b only claims a, b >= 0."""
+    from sympy import Pow, simplify
 
+    roots = [p.base for p in (a.atoms(Pow) | b.atoms(Pow)) if p.exp.is_integer is False]
     for combo in itertools.product(SMALL_VALUES, repeat=len(syms)):
         env = dict(zip(syms, combo))
+        if any(r.subs(env).is_negative for r in roots):
+            continue
         try:
             va, vb = a.subs(env), b.subs(env)
             if not (va.is_finite and vb.is_finite):

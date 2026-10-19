@@ -70,6 +70,16 @@ SCENE = {"schema_version": 1, "steps": [
     {"id": "s3", "op": "transform", "from": "s2", "latex": "g(0)=f(0)", "say": "Simplify."},
     {"id": "s4", "op": "highlight", "target": "s3", "say": "So $g(0) \\ge 0$."}]}
 
+# A compiled picture (scene v2): a triangle drawn, its right angle marked, then turned into a new place.
+PICTURE = {"schema_version": 2,
+           "figure": {"points": {"A": [0, 0], "B": [2, 0], "C": [0, 1], "P": [3, 0], "Q": [3, 2], "R": [2, 0]},
+                      "view": [-0.4, -0.4, 3.4, 2.4], "box": [0.04, 0.04, 0.92, 0.92]},
+           "steps": [
+               {"id": "s1", "op": "draw", "shape": {"kind": "polygon", "points": ["A", "B", "C"], "label": "T"}, "say": "A triangle."},
+               {"id": "s2", "op": "draw", "shape": {"kind": "angle", "points": ["B", "A", "C"]}, "say": "A right angle.\n✓ checked by SymPy"},
+               {"id": "s3", "op": "move", "target": "s1", "to": ["P", "Q", "R"], "say": "Turn it a quarter turn."},
+               {"id": "s4", "op": "highlight", "target": "s3", "say": "Same piece, new place.\n✓ true in this picture (checked by SymPy)"}]}
+
 
 def card(verdict, message):
     return {"verdict": verdict, "reason": "fake", "message": message, "counterexample": {}, "values": {}, "compared_with": None}
@@ -89,7 +99,7 @@ def fake_assist(route):
     assist_calls.append(body)
     reply = card(body["action"], {"hint": QUESTION, "answer": ANSWER, "explain": EXPLANATION}[body["action"]])
     if body["action"] == "explain" and body["kind"] == "problem":
-        reply["scene"] = SCENE
+        reply["scene"] = PICTURE if body.get("style") == "picture" else SCENE
     route.fulfill(json=reply)
 
 
@@ -321,6 +331,25 @@ with sync_playwright() as p:
     page.screenshot(path=f"{OUT}/p3_scene_end.png")
     page.evaluate("[...document.querySelectorAll('.scene .scene-controls button')].find(b => b.textContent.includes('Replay')).click()")
     check(board.locator(".scene-obj").count() == 0 and board.locator(".scene-count").inner_text() == "0 / 4", "Replay starts over")
+    js(page, "editor.deleteShapes(editor.getCurrentPageShapes().filter(s => s.type === 'mellow-scene'))")
+
+    # Explain as a picture: the confirm box offers it; the board draws shapes, turns a piece, lights it up.
+    lasso(page, 100, 490, 340, 615)
+    act(page, "explain")
+    check(page.locator("#chip-style").input_value() == "steps", "Explain offers step by step or a picture")
+    page.select_option("#chip-style", "picture")
+    confirm(page)
+    page.wait_for_selector(".scene")
+    check(assist_calls[-1].get("style") == "picture", "the request asks for a picture")
+    for k in range(4):
+        play()
+        page.wait_for_function(f"{idle} || document.querySelector('.scene .scene-controls .primary').textContent === 'Done'", timeout=5000)
+    paths = page.evaluate("[...document.querySelectorAll('.scene-figure path')].map(p => p.getAttribute('d'))")
+    check(len(paths) == 2 and paths[0].count("L") == 2, f"the figure draws a triangle and an angle mark ({paths})")
+    check(page.locator(".scene-label").count() == 1 and "true in this picture" in board.locator(".scene-checked").inner_text(),
+          "labels and picture-only checks show")
+    lit = page.evaluate("document.querySelector('.scene-figure path').style.stroke")
+    check("247, 217, 76" in lit or "f7d94c" in lit, f"highlight turns the moved piece yellow ({lit})")
     # Out of the way of the lines written below in this test (a press on a board or card is for it, not the pen).
     js(page, "editor.deleteShapes(editor.getCurrentPageShapes().filter(s => s.type === 'mellow-scene'))")
 

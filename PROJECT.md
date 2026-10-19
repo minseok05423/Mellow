@@ -132,6 +132,11 @@ These are kept even in "minimal" mode:
     click at a time: equations draw in, rewrite themselves in place (shared symbols slide to their
     new spots), and the conclusion lights up; captions say what each step does, why, and whether
     SymPy checked it. Replay starts over; Copy gives the text. On steps or a concept, a text card.
+  - **Explain as a picture** (choose it in the confirm box, on a problem or concept): the AI draws a
+    geometric, intuitive argument (areas cut and rearranged, a semicircle, a parallel line, a graph);
+    shapes draw themselves on, pieces turn and slide into place, angles light up. SymPy checks every
+    length, angle, area and equation the picture claims ("✓ checked by SymPy" for all values, "✓ true
+    in this picture" for the drawn values), and moved pieces can't stretch. Takes 2-3 minutes.
   - • **Noted**: nothing to check, no reasoning model available, or no checked proof.
 - **Cards** are ordinary page objects. Code places them in free space next to the selection
   (the LLM never picks positions). You can move or delete them, and they're saved with the
@@ -294,10 +299,11 @@ backend/           FastAPI + Pydantic + SymPy + SQLite
     assist.py       /assist: solve + SymPy-verify once, then hint / answer / explain
     structure.py    /structure: page labels from a cheap model
     scene.py        a checked proof -> scene JSON for the board
+    geometry.py     pictures: the model's figure checked by SymPy, compiled to scene JSON v2
     catalog.py      model catalog with prices
     store.py        SQLite: request log, cache, quotas
   bakeoff/run.py    recognizer bake-off over recorded samples
-  tests/            pytest suite (80 tests)
+  tests/            pytest suite (92 tests)
 ```
 
 ---
@@ -330,7 +336,7 @@ and word lines get "Noted".
 
 **Tests:**
 ```bash
-cd backend && .venv/bin/python -m pytest -q                       # 80 pass, never call real APIs
+cd backend && .venv/bin/python -m pytest -q                       # 92 pass, never call real APIs
 python3 -m venv ~/.venvs/mellow-tests                             # one-time Playwright setup
 ~/.venvs/mellow-tests/bin/pip install -r frontend/tests/requirements.txt
 ~/.venvs/mellow-tests/bin/playwright install chromium
@@ -383,6 +389,7 @@ cd backend && .venv/bin/python -m bakeoff.run ~/Downloads/mellow-samples-*.json
 21. **Lines get roles and segments;** context is found by structure, not RAG (RAG waits for P5).
 22. **Problems are solved in the background** once the page labels find them (own cap: 30/day).
 23. **Animated explanations are built by code** from the checked proof (no extra LLM call).
+24. **Pictures:** the model draws a proof, SymPy checks every claim and move, code lays it out.
 
 ---
 

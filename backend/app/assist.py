@@ -11,7 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from . import config, llm
+from . import config, geometry, llm
 from .check import CheckResponse, VERDICT_WORDS, assignment
 from .scene import proof_scene
 from .verify import check_step
@@ -24,6 +24,7 @@ class AssistRequest(BaseModel):
     problem: str | None = Field(None, max_length=4000)  # for steps: the confirmed problem they work on
     work: list[str] = Field(default_factory=list, max_length=30)  # confirmed lines between problem and selection
     definitions: list[str] = Field(default_factory=list, max_length=10)  # definitions written earlier on the page
+    style: Literal["steps", "picture"] = "steps"  # Explain on a problem or concept: equations, or a picture
     confirmed: Literal[True]  # confirm-before-judge
     reasoning_model: str | None = None
 
@@ -204,7 +205,61 @@ def _length_check(r: Reply) -> list[str]:
     return [] if 0 < len(r.text) <= 2000 else ["reply must be 1-2000 characters"]
 
 
+PICTURE_SYSTEM = r"""You explain proofs and concepts for a first-year university proofs course with a geometric,
+intuitive picture, played step by step as an animation on a dark board (like 3Blue1Brown). The picture
+should carry the argument: show WHY it is true, not only what. Prefer classic visual arguments when they
+fit: cutting and rearranging areas, similar triangles, symmetry, a square or rectangle split into pieces,
+dots or squares in a pattern, a graph of a function (secants, tangents, bands around a value).
+
+Return JSON with params, points and steps.
+- params: up to 6 one-letter lowercase names (not x) with a positive value used to draw, e.g. a=2, b=1.
+- points: named points (A, B, P_1, A'...) with coordinates as LaTeX in the params, e.g. "a+b", "\frac{a}{2}",
+  "0". Axes are the usual math axes, y up. Writing coordinates in the params keeps the picture true for
+  every value; plain numbers are fine when the picture is a specific example.
+- steps, played in order (ids s1, s2, ...; 5 to 14 steps):
+  - draw: add a shape. shape is one of point [P], segment [A,B], polygon [A,B,C,...] (filled),
+    circle [centre, a point on it], angle [A,B,C] (marks the angle at B), curve (the graph y = f, with f in
+    LaTeX in x and the params, and domain [from, to]). Optional label: short LaTeX shown on the shape
+    (no $ signs; keep labels few and short, the picture should not be crowded).
+  - move: slide or rotate an earlier polygon or segment (target) to new points (points: same number, same
+    order). Pieces only move, they never stretch: the moved shape must be congruent to the original.
+  - write: a short equation shown beside the picture (latex, no $ signs). transform: rewrite an earlier
+    write (target) into new latex.
+  - highlight / fade: target an earlier step id still on the board.
+  - say: the caption for the step: what to look at and why it matters, one or two sentences, math as $...$.
+  - claims: every fact the step's picture asserts that can be measured, as {"left": Q, "right": Q} with Q
+    one of {"length": ["A","B"]}, {"angle": ["A","B","C"]} (degrees, vertex in the middle),
+    {"area": ["A","B","C",...]}, {"value": "LaTeX in the params"}. A checker computes every claim from your
+    coordinates; a false claim, a stretched move or an unknown point is sent back to you.
+If no honest picture of the whole proof exists, picture the key idea (a graph, a number line, an example)
+and say in the captions what the picture shows and what it doesn't. Never draw a figure that misleads.
+
+Example, for "Show (a+b)^2 = a^2 + 2ab + b^2":
+{"params": [{"name": "a", "value": 2}, {"name": "b", "value": 1}],
+ "points": [{"name": "A", "x": "0", "y": "0"}, {"name": "B", "x": "a+b", "y": "0"}, {"name": "C", "x": "a+b", "y": "a+b"},
+  {"name": "D", "x": "0", "y": "a+b"}, {"name": "P", "x": "a", "y": "0"}, {"name": "Q", "x": "a+b", "y": "a"},
+  {"name": "R", "x": "a", "y": "a+b"}, {"name": "S", "x": "0", "y": "a"}, {"name": "M", "x": "a", "y": "a"}],
+ "steps": [
+  {"id": "s1", "op": "draw", "shape": "polygon", "points": ["A", "B", "C", "D"], "label": "(a+b)^2",
+   "say": "A square with side $a+b$ has area $(a+b)^2$.",
+   "claims": [{"left": {"area": ["A", "B", "C", "D"]}, "right": {"value": "(a+b)^2"}}]},
+  {"id": "s2", "op": "draw", "shape": "polygon", "points": ["A", "P", "M", "S"], "label": "a^2",
+   "say": "Cut off a square of side $a$ in one corner...",
+   "claims": [{"left": {"area": ["A", "P", "M", "S"]}, "right": {"value": "a^2"}}]},
+  {"id": "s3", "op": "draw", "shape": "polygon", "points": ["M", "Q", "C", "R"], "label": "b^2",
+   "say": "...and a square of side $b$ in the opposite corner.",
+   "claims": [{"left": {"area": ["M", "Q", "C", "R"]}, "right": {"value": "b^2"}}]},
+  {"id": "s4", "op": "draw", "shape": "polygon", "points": ["P", "B", "Q", "M"], "label": "ab",
+   "say": "What's left is two rectangles, each $a$ by $b$.",
+   "claims": [{"left": {"area": ["P", "B", "Q", "M"]}, "right": {"value": "ab"}}]},
+  {"id": "s5", "op": "draw", "shape": "polygon", "points": ["S", "M", "R", "D"], "label": "ab", "say": "",
+   "claims": [{"left": {"area": ["S", "M", "R", "D"]}, "right": {"value": "ab"}}]},
+  {"id": "s6", "op": "write", "latex": "(a+b)^2 = a^2 + 2ab + b^2",
+   "say": "The four pieces fill the square exactly, so their areas add up to the square's.",
+   "claims": [{"left": {"value": "(a+b)^2"}, "right": {"value": "a^2+2ab+b^2"}}]}]}"""
+
 NO_MODEL = "No reasoning model is set up, so I can't help with this yet."
+NO_PICTURE = "I couldn't draw a picture that passes the checker. Try Explain step by step."
 NO_PROOF = "I couldn't write an answer that passes the algebra checker. Try again, or ask for a hint."
 NOT_CHECKED = "\nAI, not machine-checked."
 
@@ -221,6 +276,8 @@ def assist(req: AssistRequest, user: str) -> CheckResponse:
         except llm.LLMError:
             proof = None  # Hint falls back to a question with no answer behind it; Answer/Explain say so
 
+    if req.action == "explain" and req.style == "picture" and req.kind in ("problem", "concept"):
+        return picture(req, problem, proof, user, model)
     if req.kind == "problem" and req.action != "hint":
         if proof is None:
             return CheckResponse(verdict="noted", reason="no_checked_answer", message=NO_PROOF)
@@ -253,3 +310,22 @@ def assist(req: AssistRequest, user: str) -> CheckResponse:
     )
     return CheckResponse(verdict=req.action, reason=f"{req.action}_{req.kind}",
                          message=out.text if hint else out.text + NOT_CHECKED)
+
+
+def picture(req: AssistRequest, problem: str | None, proof: Proof | None, user: str, model: str) -> CheckResponse:
+    """Explain with a picture (DECISIONS #24): the model draws, SymPy checks the drawing, code lays it out."""
+    parts = [f"Problem:\n{problem}" if req.kind == "problem" else f"Concept:\n{req.selection}"]
+    if proof:
+        parts.append("A checked proof, for reference (your picture may argue differently):\n"
+                     + format_proof(proof, why=False, footnote=False))
+    out = llm.structured_call(
+        endpoint="picture", user=user, cost_class="reason", model=model, system=PICTURE_SYSTEM,
+        content=[{"type": "text", "text": "\n\n".join(parts)}], schema=geometry.Picture,
+        semantic_check=geometry.picture_check, cache_input={"parts": parts, "prompt": _id(PICTURE_SYSTEM)},
+        effort="high", max_tokens=16384,  # thinking counts against max_tokens on DeepSeek
+    )
+    render = geometry.analyse(out.model_dump())  # compiled fresh, so layout fixes reach cached figures too
+    if render["errors"]:  # only if the checker changed since this figure was cached
+        return CheckResponse(verdict="noted", reason="picture_failed", message=NO_PICTURE)
+    return CheckResponse(verdict="explain", reason=f"explain_picture_{req.kind}", scene=render["scene"],
+                         message=render["text"] + "\nAI picture: claims marked ✓ were checked by SymPy.")

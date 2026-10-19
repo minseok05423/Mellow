@@ -1,6 +1,6 @@
 ---
 name: scene-json
-description: Schema and validation rules for Mellow's blackboard scene JSON (schema_version, steps, the 4 ops write/fade/transform/highlight, normalized pos). Use this whenever you write, edit, validate, or render a scene; touch the /scene or /explain endpoints, their Pydantic models or system prompts; add scene fixtures; build the frontend scene renderer; or consider adding a new op or field — even if the user just says "the √2 proof", "a proof scene", or "the steps JSON".
+description: Schema and validation rules for Mellow's blackboard scene JSON (schema_version, steps, the ops write/fade/transform/highlight, normalized pos; v2 adds a figure with draw/move for geometric pictures). Use this whenever you write, edit, validate, or render a scene; touch the /scene, /explain or picture (geometry.py) code, their Pydantic models or system prompts; add scene fixtures; build the frontend scene renderer; or consider adding a new op or field — even if the user just says "the √2 proof", "a proof scene", or "the steps JSON".
 ---
 
 # Scene JSON
@@ -91,6 +91,30 @@ python .claude/skills/scene-json/scripts/validate_scene.py path/to/scene.json
 ```
 
 Exit code 0 = valid; otherwise it prints one error per line.
+
+## Version 2: figures (DECISIONS #24)
+
+`schema_version: 2` adds a `figure` and two ops for geometric explanations. v1 scenes still play.
+
+```json
+{"schema_version": 2,
+ "figure": {"points": {"A": [0, 0], "B": [3, 0]}, "view": [-0.4, -0.4, 3.4, 3.4], "box": [0.02, 0.04, 0.56, 0.92]},
+ "steps": [{"id": "s1", "op": "draw", "shape": {"kind": "segment", "points": ["A", "B"], "label": "a+b"}, "say": "..."},
+           {"id": "s2", "op": "move", "target": "s1", "to": ["B", "A"]}]}
+```
+
+- `figure.points`: name -> `[x, y]` in math coordinates (y up). `view`: the region shown,
+  `[xmin, ymin, xmax, ymax]`. `box`: where on the stage, normalized `[x, y, w, h]`. The renderer
+  maps view into box keeping the aspect ratio.
+- `draw` {id, op, shape, say?}: shape `{kind, points, label?, pts?}`, kind one of point (1 point),
+  segment (2), polygon (3+), circle (centre, a point on it), angle (3, the vertex in the middle;
+  a right angle draws as a little square), curve (`pts`: sampled `[x, y]` list; `points` may be empty).
+- `move` {id, op, target, to, say?}: a polygon or segment slides/turns to the points `to` (same
+  count, same order). The result is addressable by this step's id; `target` is consumed.
+- `highlight` and `fade` work on shapes too (`part` only applies to equations).
+
+Scenes like this are compiled by `backend/app/geometry.py` from the model's figure after SymPy
+checks it; the model never writes v2 scene JSON directly. The reference validator checks v2 too.
 
 ## Streaming
 

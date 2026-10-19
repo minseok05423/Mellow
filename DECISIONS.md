@@ -230,3 +230,22 @@ moves the glyphs two equations share to their new places (matched by symbol, in 
 order) while the rest cross-fade, `highlight` pulses and turns yellow. Reduced-motion
 settings skip the motion. LLM-written scenes (the /scene endpoint) can come later; they
 would need the scene-json validator and SymPy checks on their algebra.
+
+## 24. Pictures: the model draws a proof, SymPy checks the drawing
+
+Explain on a problem or concept can be "a picture": a geometric, intuitive argument played on
+the board (cut-and-rearrange areas, similar triangles, a semicircle for AM-GM, graphs). The
+scene format gains a figure and two ops, `draw` (point, segment, polygon, circle, angle mark,
+curve) and `move` (a piece slides and turns to new points), because the four text ops can't
+show shapes; this is schema_version 2, and v1 scenes play as before. The model writes points
+with coordinates in a few parameters (so the picture is true for every value, not one
+drawing) and, per step, the claims its picture makes: equal lengths, angles, areas, or an
+equation. In a child process with a time limit, SymPy computes every claim from the
+coordinates: a false claim goes back to the model with the numbers; a claim that holds for
+all parameter values is "✓ checked by SymPy", one that holds only at the drawn values is
+"✓ true in this picture". A move must keep every side length (pieces never stretch), so a
+rearrangement proof can't cheat. Code compiles the figure into the scene (numeric points,
+view, curve samples, equation positions, label nudging); the model never places anything on
+the page. Only the model's figure is cached and the scene is compiled per request, so layout
+fixes reach old answers. Real tests (Pythagoras, odd numbers, triangle angles, AM-GM) all
+passed the checker first time; each picture takes 2-3 minutes at high effort.

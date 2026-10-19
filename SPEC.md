@@ -61,7 +61,8 @@ option is to offer to check automatically after a pause; off in the MVP.
 4. **Explain with AI.** A problem: the checked proof played on an animated board
    (scene JSON built from the proof, DECISIONS #23), its text one Copy away. Proof
    steps or a concept: a text card (what each step does; an explanation with an
-   example).
+   example). On a problem or concept the student can choose **a picture** instead:
+   a geometric, intuitive argument the model draws and SymPy checks (DECISIONS #24).
 
 What each action does depends on what the selection *is* (problem, proof steps or
 concept), which comes from the document structure below.

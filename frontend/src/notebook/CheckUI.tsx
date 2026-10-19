@@ -103,6 +103,7 @@ interface ChipState {
   kind: Kind;
   problem: string; // the problem the selection works on (steps only); the student confirms or fixes it
   problemRead: string; // the problem as read from the page, to tell whether the student changed it
+  style: 'steps' | 'picture'; // Explain on a problem or concept
 }
 
 // Same rule as the backend's verify.is_prose: words other than joining words make a line a statement.
@@ -176,7 +177,7 @@ export function CheckUI() {
     setError('');
     setChip({ action, lines: sel, texts: sel.map((l) => readings[l.key]?.latex ?? ''), above,
       previous: above ? readings[above.key]?.latex ?? '' : '', labelling: true, ctx: null, kind: 'steps',
-      problem: '', problemRead: '' });
+      problem: '', problemRead: '', style: 'steps' });
     // Labels for this page and the one before (usually already there from the pause after writing).
     const pages = getPages(editor).map((p) => p.id);
     const prev = pages[pages.indexOf(sel[0].pageId) - 1];
@@ -233,7 +234,8 @@ export function CheckUI() {
         const usable = (ls: Line[] = []) => ls.map((l) => readings[l.key])
           .filter((r) => r?.latex && (action !== 'answer' || r.confirmed)).map((r) => r.latex);
         const result = await api.assist({ action, kind, selection: texts.filter(Boolean).join('\n'), problem,
-          work: kind === 'steps' ? usable(ctx?.work) : [], definitions: usable(ctx?.definitions), confirmed: true });
+          work: kind === 'steps' ? usable(ctx?.work) : [], definitions: usable(ctx?.definitions), confirmed: true,
+          style: action === 'explain' && kind !== 'steps' ? chip.style : 'steps' });
         if (result.scene) addScene(editor, box, shown, result);
         else addFeedback(editor, box, shown, result);
       }
@@ -276,6 +278,16 @@ export function CheckUI() {
                 {KINDS.map((k) => <option key={k.id} value={k.id}>{k.label}</option>)}
               </select>
               {chip.ctx?.description && <span className="chip-note">in “{chip.ctx.description}”</span>}
+            </div>
+          )}
+          {!chip.labelling && chip.action === 'explain' && chip.kind !== 'steps' && (
+            <div className="chip-row chip-kind">
+              <label className="chip-label" htmlFor="chip-style">Explain as</label>
+              <select id="chip-style" aria-label="Explain as" value={chip.style}
+                onChange={(e) => setChip({ ...chip, style: e.target.value as ChipState['style'] })}>
+                <option value="steps">{chip.kind === 'problem' ? 'step by step' : 'in words'}</option>
+                <option value="picture">a picture (geometric)</option>
+              </select>
             </div>
           )}
           {!chip.labelling && chip.kind === 'steps' && (
