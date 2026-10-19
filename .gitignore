@@ -6,3 +6,4 @@ __pycache__/
 .env
 .env.local
 backend/bakeoff/results/
+backend/leaneval/results/

@@ -1,7 +1,8 @@
 # Mellow: everything in one place
 
 This file is a single overview of the project as of 2026-10-19: what Mellow is, what has been
-built, how it works, how to run and test it, and what's next. The detailed sources stay where
+built, how it works, how to run and test it, what's next, and the strategy discussions so far
+(§10). The detailed sources stay where
 they are: product spec in [SPEC.md](SPEC.md), design decisions in [DECISIONS.md](DECISIONS.md),
 working rules in [CLAUDE.md](CLAUDE.md), run instructions in [README.md](README.md).
 
@@ -76,6 +77,15 @@ These are kept even in "minimal" mode:
 7. **P3a, structure + four actions** (2026-10-19): page labels (roles + segments), the
    Check / Hint / Answer / Explain menu replacing the switch, and solve-once proofs checked by
    SymPy. Built and tested, including a real DeepSeek smoke test.
+8. **Background solving and safer checking:** pages are labelled after a pause and problems
+   solved in the background; derived claims cite their steps (a real proof by cases had been
+   "refuted" across cases); `n(n+1)` reads as a product; substitution can only verify.
+9. **Animated explanations:** Explain on a problem plays the checked proof on a dark board.
+10. **Explain as a picture:** geometric proofs the AI draws and SymPy checks (Pythagoras, odd
+    numbers, triangle angles and AM-GM all passed on the first real try).
+11. **Pasted images** are read by the image reader and work like handwriting.
+12. **Lean experiment (L0) started:** Lean 4 + Mathlib installed, a sandboxed checker and a
+    25-problem evaluation written. Not run yet: this machine is too small (see §9).
 
 ---
 
@@ -93,6 +103,9 @@ These are kept even in "minimal" mode:
 - **Raw ink:** every pen stroke also stores its full-rate points with timestamps
   (`[dx, dy, pressure, dt]`) in the shape's `meta.ink`. It's captured from pointer events, and
   tldraw alone would drop the timing that recognizers need.
+- **Pasted images** (a screenshot of a problem sheet, a photo of written work) are read by the
+  image reader at 2× and count as one line: their reading wraps under them, and selecting one
+  gives Check / Hint / Answer / Explain like handwriting.
 - **Bake-off samples:** lasso a line → *Save sample* → type the expected LaTeX. *Samples (n) ⤓*
   downloads them as JSON for the recognizer test.
 
@@ -303,7 +316,11 @@ backend/           FastAPI + Pydantic + SymPy + SQLite
     catalog.py      model catalog with prices
     store.py        SQLite: request log, cache, quotas
   bakeoff/run.py    recognizer bake-off over recorded samples
-  tests/            pytest suite (92 tests)
+  leaneval/         Lean L0 experiment: problems.json (25 problems + reference Lean statements),
+                    lean.py (sandboxed checker), run.py (prove + formalize evaluation)
+  tests/            pytest suite (98 tests)
+
+lean/              Lean 4 + Mathlib project used by leaneval (its .lake build cache is git-ignored)
 ```
 
 ---
@@ -336,7 +353,7 @@ and word lines get "Noted".
 
 **Tests:**
 ```bash
-cd backend && .venv/bin/python -m pytest -q                       # 92 pass, never call real APIs
+cd backend && .venv/bin/python -m pytest -q                       # 98 pass, never call real APIs
 python3 -m venv ~/.venvs/mellow-tests                             # one-time Playwright setup
 ~/.venvs/mellow-tests/bin/pip install -r frontend/tests/requirements.txt
 ~/.venvs/mellow-tests/bin/playwright install chromium
@@ -433,22 +450,131 @@ These are marked `shortcut:` in the code.
 
 ## 9. What's next
 
+### Where things stand (2026-10-19)
+- Everything through pasted images is committed on the `p1-p2-notebook` branch.
+- **Lean L0 is ready but not run.** On this 2-core, 8 GB Codespace a single check reloading all
+  of Mathlib ran over 7 minutes (the disk was thrashing: Mathlib's files are bigger than the
+  memory left to cache them). The Codespace has been switched to **4 cores, 16 GB**; it takes
+  effect after stopping and restarting the Codespace.
+- **Disk is the next limit:** 5.2 GB free of 32 GB. Running a Lean server in Docker needs its
+  own Mathlib (~7 GB), so `lean/.lake` (7.3 GB, a re-downloadable cache) would have to go.
+
+### Next steps for Lean (L0)
+1. Restart the Codespace on 16 GB; restart backend and frontend.
+2. Run **Kimina Lean Server** (from upstream `project-numina/kimina-lean-server`, not a fork) in
+   Docker with no network, a read-only filesystem and a memory cap, so Mathlib stays loaded in
+   warm REPLs (their benchmark: ~3.7 s per check). Point `leaneval/lean.py` at it, keeping our
+   cheat filter, statement assembly and `#print axioms` check.
+3. Run the 25-problem evaluation (DeepSeek V4 Pro and Claude Sonnet): proof success, statement
+   faithfulness, time and cost. Decide on L1 (a "proved in Lean" badge, hints from the proof
+   state) from the numbers, and record it in DECISIONS.md (it reverses #20's "no Lean for now").
+
 ### Waiting on you
+- **Restart the Codespace** to get the 16 GB machine, and OK deleting `lean/.lake` if needed.
+- **The direction questions in §10** (time, access to students, what success looks like).
 - **Bake-off samples:** record 30–50 handwritten lines on a pen device and run the bake-off.
-- **Mathpix keys:** add them if you want Mathpix in the bake-off.
 - **A tldraw license key:** for the forwarded URL and iPad tests.
-- **Open questions (SPEC §11):**
-  - Will Mellow be commercial? This decides the tldraw license.
-  - Sign-in method.
-  - Backend hosting.
-  - Recognizer vendor pricing.
+- **Open questions (SPEC §11):** commercial or not (this decides the tldraw license), sign-in
+  method, backend hosting, recognizer vendor pricing.
 
 ### Build order (SPEC §9)
-- **P3b rest** (the animated Explain board is done):
-  - the ε–δ widget on the page
-  - the reasoning-model test
-  - streaming text into cards
+- **P3b rest:** the ε–δ widget on the page, the reasoning-model test, streaming text into cards.
 - **User test #1:** 3–5 students on iPads, each working one proof.
 - **P4:** accounts, sync across devices, the learning log, and a progress view.
 - **P5:** PDF import and annotation, PDF export.
 - **P6:** handwriting search.
+
+---
+
+## 10. Direction and strategy (discussions, 2026-10-19)
+
+### Goal
+Research and community work to help students first; a startup if real pull shows up. Decide
+the startup question with thresholds set in advance (below), not by feel.
+
+### Market position
+- **The gap:** on two axes, *gives answers ↔ builds understanding* and *unverified ↔
+  verified*, answer engines (Photomath, Mathway, Wolfram) are verified but give answers;
+  chatbot study modes (ChatGPT, Claude, Gemini) teach but are unverified; note apps (Apple Math
+  Notes, GoodNotes) are handwriting-first but don't reason about proofs; Lean is rigorous but
+  too steep for first-years. Nobody owns **verified + teaching + on your own handwritten page**
+  for proofs.
+- **Positioning:** for first-year students learning to write proofs, a notebook that responds
+  to *your* reasoning: checks the algebra for real, hints instead of answering, shows *why* with
+  checked pictures, and never passes a guess off as a verdict.
+- **Beachhead:** intro-proofs and first-year analysis courses; later linear algebra, calculus,
+  olympiad training.
+- **Business model that fits community-first:** free (possibly open source) for students; paid
+  for institutions (instructor dashboard from the learning log, enforced hints-only mode, LMS
+  integration, privacy-compliant hosting).
+- **Threats:** Apple/GoodNotes adding proof tutoring; OpenAI/Google adding handwriting +
+  verification; a small niche. **Defensibility** comes from verification people can trust, data
+  on which explanations help, instructor relationships, and a public benchmark, not from the UI.
+- Competitor details above are from memory; verify with online research.
+
+### Moat, models and RL
+- Training a frontier model is out of reach, and a solo fine-tune is overtaken by the next base
+  model. What lasts: **data** (which explanations worked), **evals** that define "good math
+  teaching", **verifiers** (already built), and **distribution**.
+- "Beauty" must be measurable before it can be trained: one key idea over brute force, the
+  picture that makes it obvious, short and general, students report an "aha".
+- **RL for good explanations:** rewards from most to least trustworthy: verifier gate
+  (correctness), learning outcomes, simulated students (reward = the stuck student's next step
+  checks out, minus a penalty for giving it away), human preferences (DPO), LLM judge (easy to
+  game). Combined: correctness gate × preference score − length − answer leak. Methods: GRPO
+  (TRL's GRPOTrainer), DPO; LoRA on a 7–14B open model costs roughly $50–500 per experiment.
+- **Path:** reward v0 + calibrate a judge on ~50 ratings → best-of-N in the app (no training) →
+  log which explanation students prefer → DPO → GRPO with the simulated-student hint loop.
+- **Where you can contribute** (vs labs focused on capability): teaching, product, data and
+  trust; a public benchmark for math *teaching*; checked visual proofs as an open format.
+
+### Lean
+- **Why:** check the logic, not just the algebra; explanations built from the proof itself
+  (which lemma, which hypothesis); hints from the proof state (what's left to prove).
+- **Risks and answers:** a mistranslated statement still gets a ✓ → a human-checked problem
+  library plus back-translation confirmed in the confirm box; LLM Lean often fails to compile →
+  compile-error retry loop; running model-written Lean is code execution → sandbox (bwrap now,
+  a locked-down container in production).
+- **Prior work to study:** Lean Verbose (Massot), Waterproof, the Natural Number Game,
+  DeepSeek-Prover, Goedel-Prover, Kimina.
+- **Hosting:** a warm Lean server (Kimina) on an always-on machine with ≥16 GB. Lambda is a poor
+  fit (cold starts reload Mathlib). Rough cost: EC2 t3.xlarge ~$0.17/h (~$120/month always on),
+  r6i.large ~$0.13/h, spot 60–70% cheaper; a Codespace 4-core ~$0.36/h only while working.
+  Check student credits (GitHub Student Pack, AWS Educate). Prices are from memory; verify.
+
+### Validating demand
+1. Interview 10–15 students about the last time they were stuck on a proof (*The Mom Test*;
+   ask about their problem, don't pitch).
+2. Short clips of the picture proofs on r/learnmath, r/math, Discords, Shorts → waitlist
+   (~10% of targeted visitors signing up is a good sign).
+3. A landing page with one hook and a waitlist.
+4. A 2–3 week pilot with 5–10 students: week-2 retention without reminders, what they press,
+   "how would you feel if you couldn't use it?" (≥40% "very disappointed"), Mellow vs ChatGPT
+   on the same stuck problem.
+5. Ask for money or commitment: a founding-member price; an instructor agreeing to a pilot.
+- Online research complements this (competitors, student complaints, research on AI hints)
+  but can't show whether students would use *this* app.
+- Usability first: a first-run sample page ("lasso this → press Hint") and a hosted URL.
+
+### Set up early
+- A professor to work with (credibility, **ethics approval** for studying students, a course
+  for the pilot, a path to a paper).
+- Consent and anonymous data; reconsider DeepSeek (servers in China) for institutions; Claude
+  is wired in as the alternative.
+- Licensing: AGPL protects against hosted copies if commercializing, MIT is most open;
+  tldraw's hobby license is non-commercial.
+
+### Startup signals (decide thresholds now)
+≥40% of pilot students still using it in week 2 unprompted; an instructor asking to use it in a
+course; students sharing it or asking to pay; strangers signing up from clips.
+
+### The open decision
+Too many directions at once (app, demand, benchmark, RL, Lean, images). Pick **one question
+for the next 4–6 weeks** and park the rest. Recommendation: get Mellow used in one intro-proofs
+course and learn from it (it feeds community, research, the startup option, and tells you
+whether Lean or RL is needed); keep Lean L0 as a side experiment. To settle it, answer:
+1. Hours per week for the next two months?
+2. Access to students in an intro-proofs course (as student, TA, or via a professor)?
+3. In two months, which would make you proudest: (a) 20 students using it weekly, (b) a
+   published benchmark or paper, (c) a model that writes beautiful proofs, (d) Lean checking
+   students' proofs?
