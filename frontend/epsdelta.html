@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0c0d10" />
+    <title>Mellow — ε–δ</title>
+  </head>
+  <body>
+    <aside id="panel">
+      <h1>Continuity, ε–δ</h1>
+      <nav id="tabs">
+        <button data-demo="square"></button>
+        <button data-demo="step"></button>
+      </nav>
+      <div id="def" class="tex"></div>
+      <div id="fdef" class="tex"></div>
+      <div class="slider">
+        <label for="eps">ε</label>
+        <input type="range" id="eps" step="0.001" />
+        <output id="epsOut"></output>
+      </div>
+      <div id="delta" class="tex"></div>
+      <div id="verdict"></div>
+      <p class="hint">Drag the yellow handle, or either dashed yellow edge, up and down. Arrow keys work on the slider.</p>
+    </aside>
+    <main><canvas id="board"></canvas></main>
+    <script type="module" src="/src/epsdelta-main.ts"></script>
+  </body>
+</html>

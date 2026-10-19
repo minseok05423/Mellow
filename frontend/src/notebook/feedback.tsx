@@ -1,0 +1,127 @@
+// Feedback cards: the board's reply to "Check this step", drawn on the page as an ordinary shape the
+// student can move or delete (SPEC §4 board objects). Placement is deterministic code, never the LLM.
+
+import katex from 'katex';
+import { Box, Editor, HTMLContainer, Rectangle2d, ShapeUtil, T, TLShape, createShapeId } from 'tldraw';
+import type { CheckResult } from './api';
+import { getPages } from './pages';
+
+const TYPE = 'mellow-feedback';
+type Verdict = CheckResult['verdict'];
+
+declare module '@tldraw/tlschema' {
+  interface TLGlobalShapePropsMap {
+    [TYPE]: { w: number; h: number; verdict: Verdict; message: string; line: string };
+  }
+}
+export type FeedbackShape = TLShape<typeof TYPE>;
+
+const ICON: Record<Verdict, string> = { verified: '✓', refuted: '✗', unverified: '?', noted: '•', answer: '✦' };
+const TITLE: Record<Verdict, string> = { verified: 'Follows', refuted: 'Counterexample', unverified: 'Question', noted: 'Noted',
+  answer: 'Answer · AI, not verified' };
+
+/** Renders text with $...$ math segments via KaTeX. */
+export function MathText({ text, className }: { text: string; className?: string }) {
+  const html = text
+    .split('$')
+    .map((part, i) =>
+      i % 2 ? katex.renderToString(part, { throwOnError: false }) : part.replace(/[&<>]/g, (c) => `&#${c.charCodeAt(0)};`))
+    .join('');
+  return <span className={className} dangerouslySetInnerHTML={{ __html: html }} />;
+}
+
+/** A reading as MathText: `\text{...}` becomes plain text so a long statement wraps instead of clipping. */
+const lineText = (latex: string) => `$${latex.replace(/\\text\s*\{([^}]*)\}/g, '$$$1$$')}$`;
+
+const cardText = (shape: FeedbackShape) =>
+  `${TITLE[shape.props.verdict]}: ${shape.props.line}\n${shape.props.message}`;
+
+export class FeedbackShapeUtil extends ShapeUtil<FeedbackShape> {
+  static override type = TYPE;
+  static override props = {
+    w: T.number,
+    h: T.number,
+    verdict: T.literalEnum('verified', 'refuted', 'unverified', 'noted', 'answer'),
+    message: T.string,
+    line: T.string,
+  };
+
+  getDefaultProps(): FeedbackShape['props'] {
+    return { w: 280, h: 96, verdict: 'unverified', message: '', line: '' };
+  }
+
+  getGeometry(shape: FeedbackShape) {
+    return new Rectangle2d({ width: shape.props.w, height: shape.props.h, isFilled: true });
+  }
+
+  // Plain-text clipboard when the card itself is copied (tldraw otherwise puts nothing readable there).
+  override getText(shape: FeedbackShape) {
+    return cardText(shape);
+  }
+
+  override canResize() { return false; }
+  override hideRotateHandle() { return true; }
+
+  component(shape: FeedbackShape) {
+    const { verdict, message, line, w, h } = shape.props;
+    // Pressing on the text selects text (to copy) instead of grabbing the card; drag the card by its title.
+    const selectText = (e: React.PointerEvent) => { e.stopPropagation(); this.editor.selectNone(); };
+    return (
+      <HTMLContainer className={`feedback feedback-${verdict}`} style={{ width: w, height: h }}>
+        <div className="feedback-head">
+          <span><span className="feedback-icon">{ICON[verdict]}</span> {TITLE[verdict]}</span>
+          <button className="feedback-copy" title="Copy as text (math as LaTeX)"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={() => navigator.clipboard.writeText(cardText(shape))}>Copy</button>
+        </div>
+        <div className="feedback-body" onPointerDown={selectText}>
+          <MathText className="feedback-line" text={lineText(line)} />
+          <MathText className="feedback-msg" text={message} />
+        </div>
+      </HTMLContainer>
+    );
+  }
+
+  getIndicatorPath(shape: FeedbackShape) {
+    const p = new Path2D();
+    p.roundRect(0, 0, shape.props.w, shape.props.h, 8);
+    return p;
+  }
+}
+
+/** Free spot for a w×h card next to `near`: to the right on the same page, else below, stepping down. */
+export function placeNear(editor: Editor, near: Box, w: number, h: number): { x: number; y: number } {
+  const page = getPages(editor).find((p) => near.center.y >= p.y && near.center.y <= p.y + p.props.h);
+  const pageRight = page ? page.x + page.props.w : near.maxX + w + 24;
+  const occupied = editor
+    .getCurrentPageShapes()
+    .filter((s) => s.type !== 'mellow-page')
+    .map((s) => editor.getShapePageBounds(s)!)
+    .filter(Boolean);
+  const free = (b: Box) => !occupied.some((o) => Box.Collides(o, b));
+  const starts = [
+    { x: near.maxX + 24, y: near.minY },
+    { x: Math.max(page?.x ?? 0, near.minX), y: near.maxY + 12 },
+  ].filter((p) => p.x + w <= pageRight - 8);
+  for (const start of starts) {
+    for (let dy = 0; dy < 600; dy += 16) {
+      const b = new Box(start.x, start.y + dy, w, h);
+      if (free(b)) return { x: b.x, y: b.y };
+    }
+  }
+  return { x: near.minX, y: near.maxY + 12 };
+}
+
+export function addFeedback(editor: Editor, near: Box, line: string, result: CheckResult) {
+  // Height estimate from message length (the card can't measure KaTeX before it exists).
+  const w = 300;
+  const h = 44 + Math.ceil(line.length / 45) * 20 + Math.ceil(result.message.length / 38) * 20;
+  const { x, y } = placeNear(editor, near, w, h);
+  editor.createShape<FeedbackShape>({
+    id: createShapeId(),
+    type: TYPE,
+    x,
+    y,
+    props: { w, h, verdict: result.verdict, message: result.message, line },
+  });
+}

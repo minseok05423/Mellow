@@ -1,0 +1,157 @@
+# Decisions
+
+One paragraph per non-obvious decision: what and why. Newest at the bottom.
+
+## 1. Web instead of native iOS
+Web instead of native iOS: no Mac, no iPad, idea not yet validated; scene JSON
+schema carries over to a native renderer later.
+
+## 2. Step function has f(0) = ½
+M1 asks for a step function with a jump of 1 at x = 0 where "no δ fits when
+ε < 0.5". With the ε-band centered on f(a), that threshold only comes out to ½
+if f(a) sits at the midpoint of the jump, so f = 0 for x<0, ½ at 0, 1 for x>0.
+(With f(0) = 1 the threshold would be ε ≤ 1, outside the slider range.) Because
+the definition uses strict inequalities, ε = 0.5 exactly also has no δ; δ
+exists iff ε > ½.
+
+## 3. Show the *largest* working δ
+For x² at a = 1 the board draws δ = √(1+ε) − 1, the largest δ that works, not
+the textbook δ = min(1, ε/3). The largest δ makes the band touch the curve
+exactly at the ε-band edge, which is the picture that explains *why* it works.
+When no δ works, the board cycles a red candidate δ through 0.8, 0.4, … 0.025
+with the escaping part of the graph in red, so "no δ fits" is visible rather
+than just stated.
+
+## 4. One forwarded port; Vite proxies the backend
+The browser only talks to the Vite dev server (5173); `/api/*` is proxied to
+FastAPI on 8000. One port to forward, no CORS setup, and it mirrors production,
+where one origin serves the app and the API. Vite's `allowedHosts` includes
+`.app.github.dev` because Codespaces port forwarding sends that Host header.
+
+## 5. Magnifier inset instead of zooming the main view
+At ε = 0.05, δ ≈ 0.025 is only a few pixels wide in the main view. Rather than
+auto-zooming the camera (which would move the ε handle under the mouse mid-drag),
+a fixed inset in the corner shows a magnified view around (a, f(a)), scaled to ε.
+It hides itself when it wouldn't magnify by at least ~2×.
+
+## 6. Freeform handwriting notebook, not a cell document
+The product is a GoodNotes-style notebook where students write on pages and select
+their work to get help, not a Jupyter-style list of cells. Cells were simpler to build
+and easier for an LLM to generate. But the user's intent is students working in their
+own handwriting on a blank page, where the board responds to whatever they write.
+Spec v2 (SPEC.md) replaces the v1 milestones.
+
+## 7. Build the notebook on the tldraw SDK
+GoodNotes-level features (pressure ink, shapes, text, images, lasso, undo, zoom, and
+later sync) would take months to write ourselves. tldraw provides them and uses
+perfect-freehand for ink. Costs: it's an infinite canvas (paper pages are emulated with
+locked page shapes, as in its PDF-editor example), it has no built-in lasso (we add
+one), and production use needs a license key (free hobby key or trial for testing; a
+paid license before charging anyone). To keep a later switch possible, our data
+(stroke log, readings, scenes) lives in our own format, not only inside tldraw's records.
+
+## 8. Hybrid handwriting reading: stroke recognizer first, LLM fallback
+The device gives us strokes, not just pictures. Stroke-based math recognizers (Mathpix
+Strokes, MyScript iink) are faster, more accurate per symbol, and cheaper than vision
+LLMs on math expressions. They are fast enough to read live as the student writes.
+Vision LLMs are better at mixed prose and math, multi-row layout, and using context
+("the line above uses q, so this is q, not 9"). So the recognizer reads every line and
+an LLM corrects only prose or low-confidence lines. The vendor and LLM are picked in a
+test that replays the same recorded strokes to every candidate.
+
+## 9. Accounts and server storage (reverses "accounts out of scope")
+The user wants a lasting record of notes and progress, plus cross-device sync. That
+needs sign-in and server storage; browser-only storage loses everything when site
+data is cleared. The sync model is one student on several devices (versioned saves;
+edits made on two devices while offline are both kept), not live collaboration.
+Accounts arrive in P4, after the first user test.
+
+## 10. Raw ink lives in each stroke shape's `meta`
+The stroke log (SPEC §6) is stored on the tldraw draw shape itself (`meta.ink`), not
+in a separate store. Points are relative to the shape's origin, with timestamps. It is
+written in a before-change hook at the moment tldraw marks the stroke complete, so it
+joins the same undo step. That way it moves, deletes, undoes, redoes, persists and
+(later) syncs together with its stroke, with no second store to keep consistent.
+Cost: it ties the raw data to tldraw's records. When we export to our own format we
+read it back from `meta`. Shapes resized after writing are not rescaled yet (marked
+`shortcut:` in samples.ts).
+
+## 11. Lasso selects strokes that are mostly inside the loop
+tldraw's example lasso only selects shapes that are entirely inside the loop.
+Handwriting strokes often poke out of a hand-drawn loop (descenders, exponents), so
+ours selects a shape when at least 75% of its points are inside, and never selects
+the locked paper pages. After lassoing, it switches to the select tool so the
+selection can be moved or resized right away.
+
+## 12. Model choices are made by tests on our own data, with defaults meanwhile
+Leaderboard math scores don't measure what Mellow needs. Reading has to cope with
+*our students'* handwriting. Reasoning has to produce good questions, not give answers
+away, and write valid scene JSON fast, while SymPy decides correctness. So each slot
+gets a test on our own data (recorded strokes; real student mistakes), and a default
+until the test runs: Mathpix for ink, Sonnet 5.5 for the vision fallback, Opus 5.5 for
+reasoning. DeepSeek V4 Pro is a reasoning candidate because it's much cheaper and has
+open weights. It would run on a US/EU host of those weights, never DeepSeek's own API,
+so student data stays out of China.
+
+## 13. DeepSeek via its native API; all LLM calls stream
+The user chose DeepSeek's own API over a US/EU host of its open weights. Trade-off:
+student context sent to it goes to servers in China. DeepSeek is a reasoning candidate
+only: it takes no images, and its JSON mode doesn't enforce a schema, so our Pydantic
+validation and one retry do the enforcing. Every LLM call streams, as the user asked;
+it also protects against timeouts. Validation still runs on the complete output, and
+the streaming callback sends a "reset" before a retry, so a screen showing tokens as
+they arrive never keeps an answer that failed validation.
+
+## 14. SymPy checks run in forked processes with a hard timeout
+`simplify`/`solve` can hang, so each check runs in a child process that is killed
+after 3 s (a timeout becomes "unverified", never a verdict). Children fork from a
+forkserver with SymPy preloaded, not from the web server: forking the threaded server
+directly can deadlock, and preloading keeps a check around 0.35–0.5 s.
+
+## 15. DeepSeek for every LLM call, for now
+The user chose DeepSeek for all LLM calls: `deepseek-flash` reads line images (the
+vision fallback) and `deepseek-v4-pro` does the reasoning, both on DeepSeek's native
+API. Both default to "thinking" mode. We map our effort levels onto it: thinking off
+for live reading, where speed matters, and on with increasing depth for reasoning.
+Caveats: DeepSeek labels Flash's image input experimental, and images are reportedly
+billed at ≤384 tokens each, which may limit fine handwriting detail. The recognizer
+test should tell. Claude stays wired in: setting a `claude-*` model id in `.env`
+switches any call back without code changes.
+
+## 16. Students choose their models, from a server-controlled catalog
+The user wants students to decide which models the board uses. The backend publishes
+a catalog: each recognizer and model, its price, whether it takes images, and whether
+its key is configured. Requests may name a recognizer and a reader model, and the
+backend rejects anything not in the catalog, unconfigured, or (for reading) unable to
+take images. So the choice can't expose a key, pick an unknown model, or bypass the
+caps. The cache key already includes the model, so switching never serves another
+model's answer. Existing readings aren't redone when the choice changes; only newly
+read lines use the new choice.
+
+## 17. Proof steps in words get a question from the reasoning model
+
+A line with words beyond joining words ("so", "hence", "thus") is a statement or a proof
+step, like "Let f be continuous. Show…" or "hence p is even". SymPy can't judge it, so
+/check sends it to the student's reasoning model (DeepSeek V4 Pro by default). The model
+may only ask one short question about the weakest point. It never says right or wrong
+and never gives the answer: SPEC §4 says steps SymPy can't verify get questions, never
+verdicts. A reply that gives a verdict ("correct", "wrong", "well done") fails validation
+and is retried once. With no reasoning model available, the card just says "Noted".
+Prose lines are never used as the line an algebra step is checked against. Lassoing
+several lines gives one card: words anywhere make the selection one block for the model;
+pure math lines are each checked by SymPy and combined (the most serious verdict, with
+each line's problem listed). MyScript's math mode reads words as single letters
+("l e t f"), so a run of 3+ letters counts as words: the line goes to the LLM reader,
+and old readings like that are re-read when the notebook opens.
+
+## 18. Students choose hints or answers for proof steps in words
+
+The notebook's toolbar has a Hints / Answers switch, saved per browser. Hints is the
+default and keeps SPEC §4's rule: one guiding question, never a verdict. Answers was the
+user's call (2026-10-19): the reasoning model says plainly whether the written step holds
+and how to fix it, or writes a proof for a problem statement. That answer isn't checked
+by SymPy and can be wrong, so its card says "Answer · AI, not verified" and never reuses
+SymPy's "Follows" / "Counterexample". The model judges only what is written: a theorem
+used without naming it or checking its hypotheses counts as a gap. Answers run at higher
+thinking effort, and the two modes are cached separately. Algebra lines still get SymPy's
+verdicts in both modes, and confirm-before-judge applies to both.

@@ -1,0 +1,158 @@
+:root {
+  --desk: #e9e5dc;
+  --paper: #fffdf8;
+  --rule: #c9d6e6;
+  --margin: #f0b9b0;
+  --ink: #1d1d1f;
+  --dim: #6e6a63;
+  --accent: #2f6fde;
+}
+
+html, body, #root { margin: 0; height: 100%; }
+body {
+  font: 15px/1.4 system-ui, -apple-system, sans-serif;
+  color: var(--ink);
+  background: var(--desk);
+  overscroll-behavior: none;
+}
+
+/* ---- library ---- */
+.library { max-width: 960px; margin: 0 auto; padding: 32px 16px; }
+.library header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.library h1 { font-size: 28px; margin: 0; }
+.library ul {
+  list-style: none; padding: 0; margin: 24px 0 0;
+  display: grid; gap: 20px; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+}
+.library .empty { color: var(--dim); margin-top: 32px; }
+.cover {
+  display: flex; flex-direction: column; justify-content: flex-end; gap: 4px;
+  aspect-ratio: 210 / 297; padding: 14px; border-radius: 4px 10px 10px 4px;
+  background: var(--paper); color: inherit; text-decoration: none;
+  box-shadow: inset 6px 0 0 #2b4c7e, 0 1px 3px rgb(0 0 0 / 0.15);
+}
+.cover:hover { box-shadow: inset 6px 0 0 #2b4c7e, 0 4px 14px rgb(0 0 0 / 0.18); }
+.cover-title { font-weight: 600; font-size: 17px; word-break: break-word; }
+.cover-date { color: var(--dim); font-size: 12px; }
+.actions { display: flex; gap: 6px; margin-top: 8px; }
+
+button, select {
+  font: inherit; padding: 6px 12px; border-radius: 8px;
+  border: 1px solid #cfc9bd; background: #fff; color: inherit; cursor: pointer;
+}
+button:disabled { opacity: 0.45; cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+/* ---- notebook ---- */
+.notebook { position: fixed; inset: 0; }
+.notebook .tl-background { background: var(--desk); }
+
+.topbar {
+  pointer-events: all;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  margin: 8px; padding: 6px 8px; border-radius: 12px;
+  background: rgb(255 255 255 / 0.92); box-shadow: 0 1px 4px rgb(0 0 0 / 0.15);
+  max-width: calc(100vw - 16px);
+}
+.topbar button, .topbar select { padding: 4px 10px; font-size: 14px; }
+.topbar .back { text-decoration: none; color: inherit; font-size: 20px; padding: 0 6px; }
+.topbar .title { border: 0; background: transparent; font: 600 15px system-ui, sans-serif; width: 12ch; min-width: 6ch; }
+.topbar .title:focus { outline: 2px solid var(--accent); border-radius: 6px; }
+.topbar .sep { width: 1px; height: 22px; background: #ddd; margin: 0 4px; }
+.topbar .status { color: var(--dim); font-size: 13px; }
+.sample-form { display: flex; gap: 6px; align-items: center; }
+.sample-form input { font: 14px ui-monospace, monospace; padding: 4px 8px; border: 1px solid #cfc9bd; border-radius: 8px; width: 22ch; }
+
+/* Paper. The page shape is a plain div; the rules are CSS gradients so they scale crisply at any zoom. */
+.mellow-page {
+  background-color: var(--paper);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.12), 0 6px 18px rgb(0 0 0 / 0.08);
+}
+.paper-lined {
+  background-image:
+    linear-gradient(90deg, transparent 72px, var(--margin) 72px, var(--margin) 73.5px, transparent 73.5px),
+    repeating-linear-gradient(transparent 0 calc(var(--line) - 1.5px), var(--rule) calc(var(--line) - 1.5px) var(--line));
+  background-position: 0 0, 0 calc(var(--line) * 2);
+  background-size: 100% 100%, 100% calc(100% - var(--line) * 3);
+  background-repeat: no-repeat;
+}
+.paper-grid {
+  background-image:
+    repeating-linear-gradient(transparent 0 calc(var(--line) - 1px), var(--rule) calc(var(--line) - 1px) var(--line)),
+    repeating-linear-gradient(90deg, transparent 0 calc(var(--line) - 1px), var(--rule) calc(var(--line) - 1px) var(--line));
+}
+
+.topbar button.on { background: #e8f0fe; border-color: var(--accent); }
+
+/* ---- readings under lines (page space) ---- */
+.reading {
+  position: absolute; top: 0; left: 0; pointer-events: none; white-space: nowrap;
+  font-size: 11px; color: #8a8f98; opacity: 0.9; transform-origin: 0 0;
+  z-index: 100000; /* tldraw gives every shape (paper included) its own z-index in this layer */
+}
+.reading .katex { font-size: 1em; }
+.reading-confirmed { color: #3f8f5b; }
+.reading-unsure { color: #c47f00; }
+.reading-q { font-weight: 700; }
+.reading-busy, .reading-err { font: italic 10px system-ui, sans-serif; }
+.reading-err { color: #c0392b; }
+
+/* ---- check button + confirm chip (screen space) ---- */
+.check-btn {
+  position: absolute; z-index: 400; pointer-events: all;
+  background: var(--accent); color: #fff; border: 0; border-radius: 999px;
+  padding: 6px 14px; font-weight: 600; box-shadow: 0 2px 8px rgb(0 0 0 / 0.2);
+}
+.chip {
+  position: absolute; z-index: 400; pointer-events: all; width: min(380px, calc(100vw - 16px));
+  background: #fff; border-radius: 12px; padding: 12px 14px; box-shadow: 0 6px 24px rgb(0 0 0 / 0.22);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.chip, .chip * { user-select: text; -webkit-user-select: text; } /* tldraw turns text selection off */
+.chip-label { font-size: 12px; color: var(--dim); margin-bottom: 2px; }
+.chip-read { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 18px; }
+.chip-pen { border: 0; background: #f2f0eb; padding: 2px 10px; font-size: 15px; }
+.chip-edit input { width: 100%; box-sizing: border-box; font: 14px ui-monospace, monospace; padding: 6px 8px;
+  border: 1px solid #cfc9bd; border-radius: 8px; }
+.chip-preview { display: block; margin-top: 6px; font-size: 17px; }
+.chip-note { font-size: 12px; color: var(--dim); }
+.chip-error { font-size: 13px; color: #c0392b; }
+.chip-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* ---- feedback cards (page space shapes) ---- */
+.feedback {
+  pointer-events: all; box-sizing: border-box; padding: 10px 12px; border-radius: 8px;
+  background: #fff; border-left: 4px solid; box-shadow: 0 2px 10px rgb(0 0 0 / 0.12);
+  font: 13px/1.45 system-ui, sans-serif; color: var(--ink); display: flex; flex-direction: column; gap: 4px;
+  overflow: hidden;
+}
+.feedback-head { font-weight: 700; font-size: 13px; display: flex; justify-content: space-between; align-items: center; }
+.feedback-copy { font-size: 11px; font-weight: 500; padding: 1px 8px; border-radius: 6px; color: var(--dim); }
+.feedback-body { display: flex; flex-direction: column; gap: 4px; cursor: text; }
+/* tldraw sets user-select: none on every element inside it, so children need it too. */
+.feedback-body, .feedback-body *, .reading-selectable, .reading-selectable * { user-select: text; -webkit-user-select: text; }
+.reading-selectable { pointer-events: all; cursor: text; }
+.feedback-line { font-size: 14px; display: block; }
+.feedback-msg { white-space: pre-line; }
+.feedback-verified { border-color: #3f8f5b; }
+.feedback-verified .feedback-icon { color: #3f8f5b; }
+.feedback-refuted { border-color: #d0453a; }
+.feedback-refuted .feedback-icon { color: #d0453a; }
+.feedback-unverified { border-color: #c47f00; }
+.feedback-unverified .feedback-icon { color: #c47f00; }
+.feedback-noted { border-color: #8a8f98; }
+.feedback-answer { border-color: #6b4fd8; }
+.feedback-answer .feedback-icon, .feedback-answer .feedback-head { color: #6b4fd8; }
+.feedback-noted .feedback-icon { color: #8a8f98; }
+
+/* ---- models menu ---- */
+.models { position: relative; }
+.models-panel {
+  position: absolute; top: calc(100% + 8px); left: 0; z-index: 500; width: min(420px, calc(100vw - 24px));
+  background: #fff; border-radius: 12px; padding: 12px; box-shadow: 0 6px 24px rgb(0 0 0 / 0.22);
+  display: flex; flex-direction: column; gap: 12px;
+}
+.models-row { display: flex; flex-direction: column; gap: 4px; }
+.models-label { font-weight: 600; font-size: 13px; display: flex; justify-content: space-between; gap: 8px; }
+.models-label small, .models-note, .models-foot { font-weight: 400; color: var(--dim); font-size: 12px; }
+.models-row select { width: 100%; }
