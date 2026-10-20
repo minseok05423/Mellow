@@ -73,5 +73,9 @@ about $7/month while it's stopped.
 - **Reading**: lines are read live and shown faintly under each line (*Readings on/off*).
 - **Check with Lean**: lasso a problem and its proof → **Check with Lean** → confirm or fix the readings and which
   line is the problem → Lean states the problem, shown in plain words for you to confirm → Lean checks every line →
-  a card next to the proof: ✓ checked, ✓ true but a step is missing, ✗ wrong reason, ? couldn't verify.
+  a card next to the proof: ✓ checked, ⋯ follows but a step is missing, ~ right claim but wrong reason, ✗ false
+  (with values Lean checked: "fails for k = 1, m = 1"), ? couldn't verify. Checking the same problem again reuses the
+  confirmed statement.
+- **Measuring the friends test**: the app logs a few events (`events` table: check started and result, statement
+  rejected, leaving during a wait, the answer to "What will you do now?") and a Feedback button in the top bar.
 - **Tests**: backend `pytest`; frontend see `frontend/tests/README.md`.

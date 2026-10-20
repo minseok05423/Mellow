@@ -155,3 +155,12 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 .feedback-lean_complete .feedback-icon { color: #3f8f5b; }
 .feedback-lean_issues { border-color: #c47f00; }
 .feedback-lean_issues .feedback-icon { color: #c47f00; }
+
+/* "What will you do now?" after a ✗ or ?: optional, above the toolbar, never in the way of the ink. */
+.ask {
+  position: absolute; z-index: 400; pointer-events: all; left: 50%; bottom: 72px; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: center; max-width: calc(100vw - 16px);
+  background: #fff; border-radius: 12px; padding: 8px 12px; box-shadow: 0 4px 16px rgb(0 0 0 / 0.18); font-size: 14px;
+}
+.ask button { min-height: 44px; padding: 0 14px; border: 1px solid #cfc9bd; border-radius: 999px; background: #fff; }
+.ask .ask-close { border: 0; font-size: 20px; padding: 0 8px; color: var(--dim); }

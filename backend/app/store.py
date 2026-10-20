@@ -15,6 +15,8 @@ CREATE TABLE IF NOT EXISTS request_log (
   cached INTEGER, latency_ms INTEGER, input_tokens INTEGER, output_tokens INTEGER
 );
 CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value TEXT, created REAL);
+-- What students do around a check (the friends test, PROJECT.md §11): one row per event, `data` as JSON.
+CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, ts REAL, user TEXT, check_id TEXT, event TEXT, data TEXT);
 CREATE TABLE IF NOT EXISTS usage (
   user TEXT, day TEXT, cost_class TEXT, count INTEGER, PRIMARY KEY (user, day, cost_class)
 );
@@ -37,6 +39,12 @@ def log(**row) -> None:
     cols = ",".join(row)
     with connect() as c:
         c.execute(f"INSERT INTO request_log ({cols}) VALUES ({','.join('?' * len(row))})", list(row.values()))
+
+
+def event(user: str, check_id: str, event: str, data: dict) -> None:
+    with connect() as c:
+        c.execute("INSERT INTO events (ts, user, check_id, event, data) VALUES (?, ?, ?, ?, ?)",
+                  (time.time(), user, check_id, event, json.dumps(data)))
 
 
 def cache_get(key: str):

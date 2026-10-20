@@ -88,12 +88,20 @@ Fix only how the lines are translated: tactics, syntax, names, splitting and clo
 exactly what the student wrote; whether a claim is true is not your concern."""
 
 PROVE_SYSTEM = """You prove single steps inside a Lean 4 + Mathlib proof. You get the proof so far and, for each step to
-prove, its index, its claim and Lean's goal state at that step (the hypotheses in scope). Return JSON {"proofs": [...]},
-each {"index": the step's index, "proof": the tactic lines that prove that claim from the hypotheses in scope, one tactic
-per line}. Never use sorry, admit, axioms, native_decide, #eval, or search tactics (exact?, apply?, simp?). Never change
-a claim. If you believe a claim is false or does not follow from the hypotheses in scope, return "" as its proof.
-Prefer named Mathlib lemmas and robust tactics: obtain, rcases, simp [lemmas], rw, ring, omega, linarith [facts],
-nlinarith [facts], positivity, gcongr, abs_lt, abs_sub_lt_iff, Finset.sum_range_succ, Int.even_or_odd, ..."""
+prove, its index, its claim, Lean's context at that step (the variables and hypotheses in scope) and Lean's message.
+Return JSON {"proofs": [...]}, each {"index": the step's index, "proof": the tactic lines that prove that claim from the
+hypotheses in scope, one tactic per line}. Never use sorry, admit, axioms, native_decide, #eval, or search tactics
+(exact?, apply?, simp?). Never change a claim. Prefer named Mathlib lemmas and robust tactics: obtain, rcases,
+simp [lemmas], rw, ring, omega, linarith [facts], nlinarith [facts], positivity, gcongr, abs_lt, abs_sub_lt_iff,
+Finset.sum_range_succ, Int.even_or_odd, ...
+If the claim is false, meaning it can fail while every hypothesis in the context holds, return "" as its proof and a
+counterexample instead: "counterexample": [{"name", "value"}], a value (one Lean term) for every variable in the
+context, not for hypotheses, chosen so that every hypothesis holds and the claim fails; and "check": tactic lines
+proving that for those values. We build `∃ <variables>, <hypotheses> ∧ ¬ (<claim>)` from Lean's context ourselves and
+start the proof with `refine ⟨<your values>, ?_⟩`, so "check" proves the rest, usually `norm_num` (add lemmas such as
+Int.even_iff, Nat.odd_iff as needed). Prefer small nonzero values, and avoid division by zero and natural-number
+subtraction below zero, unless no other values work. If the claim may be true but you can't prove it, return "" and
+no counterexample."""
 
 
 class Item(BaseModel):
@@ -110,9 +118,16 @@ class Translation(BaseModel):
     items: list[Item] = Field(min_length=1, max_length=80)
 
 
+class Value(BaseModel):
+    name: str = Field(max_length=40)
+    value: str = Field(max_length=200)
+
+
 class StepProof(BaseModel):
     index: int
     proof: str = Field("", max_length=4000)
+    counterexample: list[Value] = Field(default_factory=list, max_length=20)
+    check: str = Field("", max_length=2000)
 
 
 class StepProofs(BaseModel):
@@ -147,9 +162,68 @@ def problems_check(t: Translation, n_lines: int, hyps: list[str]) -> list[str]:
 
 def proofs_check(p: StepProofs, todo: set[int]) -> list[str]:
     errs = [f"step {s.index} wasn't asked for" for s in p.proofs if s.index not in todo]
-    errs += [f"step {s.index}: not allowed: {bad.group(0)!r}" for s in p.proofs
-             if (bad := lean.FORBIDDEN.search(s.proof) or SPOOF.search(s.proof))]
+    for s in p.proofs:
+        text = "\n".join([s.proof, s.check, *(v.value for v in s.counterexample)])
+        if bad := lean.FORBIDDEN.search(text) or SPOOF.search(text):
+            errs.append(f"step {s.index}: not allowed: {bad.group(0)!r}")
+        # A value sits inside `refine ⟨...⟩`: one term, nothing that could close the bracket or start a proof.
+        if any(re.search(r"[\n⟨⟩;]|:=", v.value) for v in s.counterexample):
+            errs.append(f"step {s.index}: each counterexample value must be a single Lean term")
     return errs
+
+
+def context_entries(msg: str) -> list[tuple[list[str], str]] | None:
+    """Lean's printed context ("a b : ℤ", "hk : a = k + k", up to "⊢") as (names, type) pairs; None when it can't be
+    typed back in exactly (an inaccessible name a✝, a `let` value, an elided term ⋯). Our own `_ctx`/`_reason` blocks
+    (`: True`) are left out."""
+    rows: list[str] = []
+    for line in msg.split("\n")[1:]:
+        if line.startswith("⊢"):
+            break
+        if line[:1].isspace() and rows:
+            rows[-1] += " " + line.strip()  # a long hypothesis wraps onto indented lines
+        else:
+            rows.append(line)
+    out = []
+    for row in rows:
+        names, sep, typ = row.partition(" : ")
+        names, typ = names.split(), typ.strip()
+        if not sep or not names:
+            return None
+        if typ == "True" and all(n.startswith("_") for n in names):
+            continue
+        if any("✝" in n for n in names) or ":=" in typ or "⋯" in typ:
+            return None
+        out.append((names, typ))
+    return out
+
+
+def refutation_statement(claim: str, entries: list[tuple[list[str], str]], values: dict[str, str]
+                         ) -> tuple[str, list[str]] | None:
+    """`∃ vars, hyps ∧ ¬ claim`: values exist where every hypothesis in scope holds and the claim fails, so the claim
+    doesn't follow from them. Built from Lean's own context, never from the model. Entries the model gave values for
+    are bound; the rest must hold as conditions. (A variable left without a value becomes a nonsense condition, so
+    Lean rejects the statement: nothing unsound gets through.)"""
+    binders, conds, vals = [], [], []
+    for names, typ in entries:
+        if all(n in values for n in names):
+            binders.append(f"({' '.join(names)} : {typ})")
+            vals += [values[n] for n in names]
+        elif any(n in values for n in names):
+            return None
+        else:
+            conds.append(f"({typ})")
+    body = " ∧ ".join([*conds, f"¬ ({claim})"])
+    return (f"∃ {' '.join(binders)}, {body}" if binders else body), vals
+
+
+def proved_decls(out: str) -> set[str]:
+    """Theorems that `#print axioms` shows were proved with Lean's standard axioms only (no sorry)."""
+    done = set()
+    for m in re.finditer(r"'([\w.]+)' (?:depends on axioms: \[(.*?)\]|does not depend on any axioms)", out, re.S):
+        if {a.strip() for a in (m.group(2) or "").split(",") if a.strip()} <= lean.STANDARD_AXIOMS:
+            done.add(m.group(1))
+    return done
 
 
 def hypotheses(statement: str) -> list[str]:
@@ -163,13 +237,16 @@ def hypotheses(statement: str) -> list[str]:
     return [n for group in re.findall(r"[({\[]\s*([^(){}\[\]:]+?)\s*:", statement) for n in group.split() if n.isidentifier()]
 
 
-def assemble(statement: str, items: list[Item], proofs: dict[int, str] | None = None
+def assemble(statement: str, items: list[Item], proofs: dict[int, str] | None = None,
+             refutations: dict[int, dict] | None = None, trivial: bool = False
              ) -> tuple[str, dict[int, tuple[int, str, int]], dict[int, list[int]]]:
     """The Lean file; for each proof line (1-based, as Lean counts) its (item, part, column where the claim's proof
     starts); and which student lines each `trace "mellow k"` marker vouches for. A failing tactic can make Lean skip the
     rest of the proof without an error on those lines, so a line only counts once Lean has printed the markers after it.
-    `proofs` replaces AUTO for single claims (step 4 above)."""
-    proofs = proofs or {}
+    `proofs` replaces AUTO for single claims (step 4 above). Before every claim, Lean prints its context (step 6).
+    `refutations` adds counterexamples (step 6) and `trivial` asks whether AUTO proves the whole theorem alone: both
+    come after the theorem, as theorems of their own."""
+    proofs, refutations = proofs or {}, refutations or {}
     hyps = hypotheses(statement)
     body, where, markers, pending = [], {}, {}, set()
 
@@ -182,6 +259,16 @@ def assemble(statement: str, items: list[Item], proofs: dict[int, str] | None = 
         if i.kind == "tactic":
             emit(i.indent, i.text, idx, "tactic")
         else:
+            # An error message is how Lean prints the context at a line; inside `True`, so nothing is left behind.
+            emit(i.indent, f'have _ctx{idx} : True := by fail "mellow ctx"', idx, "ctx")
+            if idx in refutations:
+                # Each hypothesis as we re-typed it from Lean's printout must be the real one, or the counterexample
+                # might satisfy a weaker version of it.
+                emit(i.indent, f"have _faith{idx} : True := by", idx, "faith")
+                for names, typ in refutations[idx]["entries"]:
+                    for n in names:
+                        emit(i.indent + 1, f"have _ : {typ} := {n}", idx, "faith")
+                emit(i.indent + 1, "trivial", idx, "faith")
             if i.reasons and idx not in proofs:
                 # Inside a `True` block, so neither its result nor its failure leaves the claim behind for later lines.
                 clear = "".join(f"(try clear {h}); " for h in hyps if h not in i.reasons)
@@ -207,16 +294,33 @@ def assemble(statement: str, items: list[Item], proofs: dict[int, str] | None = 
         # A block opener's marker goes inside the block, as its first tactic.
         emit(i.indent + (text.endswith("=>") or text == "·"), f'trace "mellow {k}"', idx, "marker")
         pending = set()
-    head = f"import Mathlib\n\nset_option maxHeartbeats 1000000\n\ntheorem target {statement} := by\n"
+    # `#print axioms` vouches that each of these was really proved, without sorry.
+    for idx, r in refutations.items():
+        if (st := refutation_statement(items[idx].text, r["entries"], r["values"])) is None:
+            continue
+        claim, values = st
+        emit(-1, f"theorem cex_{idx} : {claim} := by", idx, "cex")
+        if values:
+            emit(0, "refine ⟨" + ", ".join(f"({v})" for v in values) + ", ?_⟩", idx, "cex")
+        for line in textwrap.dedent(r["check"].strip("\n")).splitlines():
+            emit(0, line.rstrip(), idx, "cex")
+        emit(-1, f"#print axioms cex_{idx}", idx, "cex")
+    if trivial:
+        emit(-1, f"theorem trivial_check {statement} := by {AUTO}", -1, "trivial")
+        emit(-1, "#print axioms trivial_check", -1, "trivial")
+    head =f"import Mathlib\n\nset_option maxHeartbeats 1000000\n\ntheorem target {statement} := by\n"
     return head + "\n".join(body) + "\n", where, markers
 
 
 def verdicts(out: str, where: dict, markers: dict[int, list[int]], items: list[Item], n_lines: int,
              proved_by_model: set[int] = frozenset()) -> dict:
-    """Per student line: proved / skipped step / wrong reason / not proved / unchecked (Lean never got there: a parse
-    error, or an earlier failing tactic that ended the proof). Also the translation's structural errors (for a retry)
-    and the claims whose proof failed (for single-claim proofs)."""
+    """Per student line: proved / skipped step / wrong reason / false (a counterexample Lean checked) / not proved /
+    unchecked (Lean never got there: a parse error, or an earlier failing tactic that ended the proof). Also the
+    translation's structural errors (for a retry), the claims whose proof failed (for single-claim proofs), each
+    claim's context as Lean printed it, and whether the theorem is trivial for AUTO."""
     errs: dict[int, dict[str, list[str]]] = {}
+    contexts: dict[int, str] = {}
+    unfaithful: set[int] = set()
     parse_from, unfinished, other = n_lines, False, []
     for e in lean._errors(out, offset=0):
         m = re.match(r"line (-?\d+), col (\d+): (.*)", e, re.S)
@@ -225,6 +329,14 @@ def verdicts(out: str, where: dict, markers: dict[int, list[int]], items: list[I
             other.append(e[:600])
             continue
         idx, part, by_col = where[int(m.group(1))]
+        if part == "ctx":
+            if m.group(3).startswith("mellow ctx"):
+                contexts[idx] = m.group(3)
+                continue
+            part = "tactic"  # e.g. "no goals": the claim comes after the proof was closed, a structural error
+        if part in ("faith", "cex", "trivial"):  # judged by `#print axioms` below, never the student's lines
+            unfaithful.add(idx)
+            continue
         if part == "claim" and int(m.group(2)) >= by_col:
             part = "proof"
         errs.setdefault(idx, {}).setdefault(part, []).append(m.group(3)[:800])
@@ -238,6 +350,8 @@ def verdicts(out: str, where: dict, markers: dict[int, list[int]], items: list[I
     structural = [f"line {items[idx].line}, {items[idx].kind} `{items[idx].text}`: {msg}"
                   for idx, parts in errs.items() for part in ("tactic", "claim", "exact") for msg in parts.get(part, [])
                   if "provided type annotation" not in msg]
+    decls = proved_decls(out)
+    refuted = {int(d[4:]) for d in decls if d.startswith("cex_")} - unfaithful
 
     def verdict(s: int) -> str:
         mine = [idx for idx, i in enumerate(items) if i.line == s]
@@ -245,7 +359,7 @@ def verdicts(out: str, where: dict, markers: dict[int, list[int]], items: list[I
         if s >= parse_from:
             return "unchecked"
         if parts & {"tactic", "claim", "exact", "proof"}:
-            return "not proved"
+            return "false" if refuted & set(mine) else "not proved"
         if not reached[s]:
             return "unchecked"
         if "reason" in parts:
@@ -255,7 +369,8 @@ def verdicts(out: str, where: dict, markers: dict[int, list[int]], items: list[I
     return {"lines": [verdict(s) for s in range(n_lines)], "structural": structural,
             "failed_claims": sorted(idx for idx, parts in errs.items() if "proof" in parts and "claim" not in parts),
             "errors": {str(idx): parts for idx, parts in errs.items()}, "unfinished": unfinished or bool(other),
-            "other_errors": other}
+            "other_errors": other, "contexts": contexts, "refuted": sorted(refuted),
+            "trivial": "trivial_check" in decls}
 
 
 def translate(statement: str, lines: list[str], model: str, feedback: list[str], user: str) -> Translation | None:
@@ -274,12 +389,16 @@ def translate(statement: str, lines: list[str], model: str, feedback: list[str],
         return None
 
 
-def prove_steps(src: str, items: list[Item], todo: list[int], errors: dict, model: str, user: str) -> dict[int, str]:
-    """One call per claim, in parallel: a short think each, and one hard claim can't time out the others."""
-    def one(idx: int) -> str:
+def prove_steps(src: str, items: list[Item], todo: list[int], errors: dict, contexts: dict[int, str], model: str,
+                user: str) -> tuple[dict[int, str], dict[int, dict]]:
+    """One call per claim, in parallel: a short think each, and one hard claim can't time out the others. Each call
+    returns a proof of the claim, or a counterexample to it (step 6), or neither."""
+    def one(idx: int) -> StepProof | None:
         msg = "\n".join(errors.get(str(idx), {}).get("proof", []))[:2500]
+        ctx = "\n".join(contexts.get(idx, "").split("\n")[1:-1])  # without our "mellow ctx" line and "⊢ True"
         content = (f"The proof so far:\n```lean\n{src}```\n\nStep to prove:\n\nStep {idx}: "
-                   f"`have {items[idx].name} : {items[idx].text}`\nLean's message:\n{msg}")
+                   f"`have {items[idx].name} : {items[idx].text}`\nLean's context at this step:\n{ctx}\n"
+                   f"Lean's message:\n{msg}")
         try:
             out = llm.structured_call(endpoint="lean_step_proofs", user=user, cost_class="lean", model=model,
                                       system=PROVE_SYSTEM, content=[{"type": "text", "text": content}],
@@ -287,12 +406,18 @@ def prove_steps(src: str, items: list[Item], todo: list[int], errors: dict, mode
                                       cache_input={"content": content, "prompt": _id(PROVE_SYSTEM)},
                                       effort="high", max_tokens=16384)
         except llm.LLMError:
-            return ""
-        return next((s.proof for s in out.proofs if s.index == idx), "")
+            return None
+        return next((s for s in out.proofs if s.index == idx), None)
 
     with ThreadPoolExecutor(max_workers=4) as pool:
         got = dict(zip(todo, pool.map(one, todo)))
-    return {idx: p for idx, p in got.items() if p.strip()}
+    proofs = {idx: s.proof for idx, s in got.items() if s and s.proof.strip()}
+    refutations = {}
+    for idx, s in got.items():
+        if s and not s.proof.strip() and s.counterexample and (entries := context_entries(contexts.get(idx, ""))):
+            refutations[idx] = {"entries": entries, "values": {v.name: v.value.strip() for v in s.counterexample},
+                                "check": s.check.strip() or "norm_num"}
+    return proofs, refutations
 
 
 def under_contradiction(items: list[Item]) -> set[int]:
@@ -317,14 +442,15 @@ def check(statement: str, lines: list[str], model: str, user: str) -> dict:
     if t is None:
         return {"translated": False, "lines": ["unchecked"] * len(lines), "seconds": round(time.time() - t0)}
 
-    def run(proofs: dict[int, str]):
+    def run(proofs: dict[int, str], refutations: dict[int, dict] | None = None, trivial: bool = False):
         nonlocal lean_s
-        src, where, markers = assemble(statement, t.items, proofs)
+        src, where, markers = assemble(statement, t.items, proofs, refutations, trivial)
         out, secs = lean._run(src)
         lean_s += secs
         return src, verdicts(out, where, markers, t.items, len(lines), set(proofs))
 
-    src, v = run({})
+    src, v = run({}, trivial=True)
+    trivial = v["trivial"]
     while v["structural"] and retries < RETRIES:
         retries += 1
         if (t2 := translate(statement, lines, model, v["structural"], user)) is None:
@@ -333,17 +459,21 @@ def check(statement: str, lines: list[str], model: str, user: str) -> dict:
         src, v = run({})
     first_pass = v["lines"]
 
-    proofs, gave_up = {}, set()
+    proofs, refutations, gave_up = {}, {}, set()
     for _ in range(PROOF_ROUNDS):
         todo = [idx for idx in v["failed_claims"] if idx not in gave_up and idx not in under_contradiction(t.items)]
         if not todo:
             break
-        got = prove_steps(src, t.items, todo, v["errors"], model, user)
+        got, refs = prove_steps(src, t.items, todo, v["errors"], v["contexts"], model, user)
         gave_up |= set(todo) - set(got)
         proofs.update(got)
-        src, v = run(proofs)
+        refutations.update(refs)
+        src, v = run(proofs, refutations)
+    counterexamples = {t.items[idx].line: refutations[idx]["values"] for idx in v["refuted"]}
     return {"translated": True, "items": [i.model_dump() for i in t.items], "retries": retries, "first_pass": first_pass, "model_proofs": len(proofs),
-            "lean_seconds": round(lean_s, 1), "seconds": round(time.time() - t0), "lean": src, **v}
+            "lean_seconds": round(lean_s, 1), "seconds": round(time.time() - t0), "lean": src, **v,
+            "trivial": trivial, "counterexamples": counterexamples,
+            "contradiction_lines": sorted({t.items[idx].line for idx in under_contradiction(t.items)})}
 
 
 # ---- the problem's statement ----
@@ -389,28 +519,65 @@ def state(problem: str, user: str) -> dict:
 
 # ---- what the student sees ----
 
+RESULT_VERSION = 2  # part of /lean/check's cache key: bump when what the student sees changes meaning
+
 MESSAGES = {
-    "proved": "Lean checked this step.",
-    "skipped step": "True, and Lean checked it, but it needs a step you didn't write.",
-    "wrong reason": "True, but it doesn't follow from the reason you gave.",
-    "not proved": "Lean couldn't verify this line. It may be wrong, or need more steps.",
+    "proved": "",
+    "skipped step": "Follows, but Lean needed a step you didn't write here. Can you add it?",
+    "wrong reason": "Right claim, wrong reason: it doesn't follow from the reason you gave.",
+    "false": "False as written: it fails for {values}.",
+    "not proved": "Lean couldn't get from your earlier lines to this one. Check it, or add the step in between.",
     "unchecked": "Not checked: Lean stopped before this line.",
 }
+# Lean's conventions (1/0 = 0, 0 - 1 = 0 in ℕ) make a claim "false" at 0 that the student meant to exclude.
+EDGE = "False as written when {values}. Did you mean to rule that out?"
+
+
+def _plain(value: str) -> str:
+    """A Lean value as the student would write it: `(1 : ℤ)` -> `1`."""
+    return re.sub(r"^\((.*?)\s*:\s*[^()]*\)$", r"\1", value.strip())
+
+
+def _lines_text(ks: list[int]) -> str:
+    return f"line{'s' if len(ks) > 1 else ''} {', '.join(str(k + 1) for k in ks)}"
 
 
 def summary(result: dict) -> dict:
-    """The check's result for the student: each line's verdict and message, the Lean it became, and one sentence."""
-    items = result.get("items", [])
-    lines = [{"verdict": v, "message": MESSAGES[v],
-              "lean": [i["text"] for i in items if i["line"] == k]} for k, v in enumerate(result["lines"])]
+    """The check's result for the student: each line's verdict and message, the Lean it became, and one sentence.
+    Honest about what a ✓ means: a gap the model filled is never "complete", and a ✓ that rests on an unverified line
+    says so."""
+    items, verdicts_ = result.get("items", []), result["lines"]
+    lines, unverified = [], None
+    for k, v in enumerate(verdicts_):
+        msg = MESSAGES[v]
+        if v == "false":
+            vals = {n: _plain(x) for n, x in result["counterexamples"].get(k, {}).items()}
+            msg = (EDGE if "0" in vals.values() else msg).format(values=", ".join(f"{n} = {x}" for n, x in vals.items()))
+        if v in ("proved", "skipped step") and unverified is not None:
+            msg = f"{msg} It follows from the lines above, but line {unverified + 1} isn't verified.".strip()
+        if v in ("false", "not proved") and unverified is None:
+            unverified = k
+        lines.append({"verdict": v, "message": msg, "lean": [i["text"] for i in items if i["line"] == k]})
+
+    bad = [k for k, v in enumerate(verdicts_) if v not in ("proved", "skipped step")]
+    gaps = [k for k, v in enumerate(verdicts_) if v == "skipped step"]
     if not result["translated"]:
         overall = "Lean couldn't translate this proof. Try writing each step as one claim per line."
-    elif all(v in ("proved", "skipped step") for v in result["lines"]):
-        overall = ("Every line holds, but the proof doesn't reach the conclusion yet." if result["unfinished"]
-                   else "Lean checked every line, and the proof is complete.")
+    elif bad:
+        false = [k for k in bad if verdicts_[k] == "false"]
+        rest = [k for k in bad if verdicts_[k] != "false"]
+        overall = " ".join([f"{_lines_text(false).capitalize()} {'is' if len(false) == 1 else 'are'} false as written."
+                            if false else "", f"Look again at {_lines_text(rest)}." if rest else ""]).strip()
+    elif gaps:
+        overall = f"Every line holds, but {_lines_text(gaps)} skip{'s' if len(gaps) == 1 else ''} a step."
+    elif result["unfinished"]:
+        overall = "Every line holds, but the proof doesn't reach the conclusion yet."
     else:
-        bad = [str(k + 1) for k, v in enumerate(result["lines"]) if v not in ("proved", "skipped step")]
-        overall = f"Look again at line{'s' if len(bad) > 1 else ''} {', '.join(bad)}."
-    return {"lines": lines, "complete": result["translated"] and not result["unfinished"]
-            and all(v in ("proved", "skipped step") for v in result["lines"]), "message": overall,
-            "seconds": result.get("seconds", 0)}
+        overall = "Lean checked every line, and the proof is complete."
+    if result.get("trivial") and not bad:
+        overall += " Lean proves this statement on its own, so it can't judge whether your steps are detailed enough."
+    if any(verdicts_[k] in ("not proved", "unchecked") for k in result.get("contradiction_lines", [])):
+        overall += (" Lean checks little inside a proof by contradiction: there, \"?\" means it couldn't verify a "
+                    "line, not that the line is wrong.")
+    complete = result["translated"] and not result["unfinished"] and not bad and not gaps
+    return {"lines": lines, "complete": complete, "message": overall, "seconds": result.get("seconds", 0)}

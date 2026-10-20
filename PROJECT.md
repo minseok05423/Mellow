@@ -429,3 +429,60 @@ it into one intro-proofs course stays the way to learn whether students use it. 
 3. In two months, which would make you proudest: (a) 20 students using it weekly, (b) a
    published benchmark or paper, (c) a model that writes beautiful proofs, (d) Lean checking
    students' proofs?
+
+---
+
+## 11. Product discussions (log)
+
+### 2026-10-20: four reviewers, two rounds
+Four agents read the code, docs and screenshots, each from one side: a first-year student, an intro-proofs
+instructor, a pen-first iPad designer, and a skeptical product strategist. Round 2 had them critique a combined plan.
+
+**Where they agreed**
+- **A "?" on a real mistake wastes Lean's one strength.** The planted `2(km)` shows "? couldn't verify", which a
+  student reads as "Lean is picky". All four asked for "false" to be told apart from "couldn't verify", ideally with
+  a counterexample. The student wants bare values ("fails for k = 1, m = 1", working out why is the learning); the
+  instructor wants edge values (0, division by zero, ℕ subtraction) worded as "did you mean to rule that out?",
+  since Lean's 1/0 = 0 and ℕ's 0 − 1 = 0 make "false" pedantic there.
+- **A ✓ can mislead.** Line 4 got "✓ Lean checked this step" on top of the wrong line 3 (it does follow from line 3,
+  but a student reads ✓ as "true"). "Skipped step" shows ✓, and the card says "complete" even when the model filled a
+  step. Instructor: "false confidence is the one failure I can't accept".
+- **Contradiction proofs** (√2: 0/6 lines) are week-3 homework. Until fixed, say "Lean checks little inside a proof
+  by contradiction", so "?" isn't read as "wrong".
+
+**Points from one side each**
+- *Instructor:* Lean's automation can be too lenient on step size (Mathlib's simp knows "even + even is even", so a
+  proof that restates the goal passes). Smallest generic rules: (1) prove the conclusion with the givens cleared;
+  (2) if the automation proves the whole theorem alone, say so ("Lean finds this immediate, so the size of your steps
+  isn't checked"). Needs before recommending to a class: evidence on 200+ graded proofs, a vetted problem list with
+  locked statements, and no student handwriting sent to DeepSeek without a privacy review.
+- *Designer:* 5 taps and 2 waits, with a tap between the waits; the confirm box covers the ink it asks you to
+  confirm and shows raw LaTeX; late readings never fill in; touch targets are ~22px. Proposed margin marks per line
+  (keyed by line key, so they vanish when the ink changes), "Check again" that skips unchanged confirms, prefetching
+  the statement, and running the check while the student reads the statement (shown only after "Yes").
+- *Strategist:* the job is "find the line where my proof breaks before the grader does"; never lead with Lean. Real
+  competitor: ChatGPT with a photo. Measure behaviour, not opinions: five events (check started with a sample flag,
+  statement rejected, check result, abandoned during the wait, an answer to "what will you do now?" after a ✗ or ?).
+  Thresholds: keep going if most testers check their own problems twice, someone fixes a flagged line and rechecks,
+  zero false ✓ in a hand audit, and someone returns unprompted. Get the "why" from log-driven follow-up messages and
+  one 15-minute screen-share call each. Switch the reading fallback off DeepSeek before any course pilot.
+
+**Decided:** build honest verdicts, counterexamples and the measurement first; "Check again" next. Margin marks
+and confirm-box polish wait for the logs to show where students drop off. Rule (1) on step size waits for an L0b
+measurement; rule (2) is cheap and goes in with honest verdicts.
+
+### 2026-10-20: L0c, an LLM grading alone (`backend/leaneval/alone.py`)
+The strategist's head-to-head: L0b's 11 problems, correct and planted-mistake proofs as text, "is my proof
+correct?", 3 runs each.
+
+| model | wrong proofs passed | correct proofs rejected | mistake at the right line | cost |
+|---|---|---|---|---|
+| Claude Sonnet 5.5 | 0/33 | 0/33 | 33/33 | $0.18 |
+| Claude Haiku 5.5 | 0/33 | 0/33 | 33/33 | $0.02 |
+
+On our own planted mistakes, an LLM alone is as good as Lean at catching them and better on false alarms (Lean:
+6/48 correct lines "?"). The planted mistakes are too blatant to show Lean's value, so "ChatGPT passes wrong proofs"
+can't be the pitch on this evidence. What would show it: subtle mistakes (quantifier order, the converse, dividing
+by something that may be zero, assuming the conclusion), real student mistakes, photos instead of text, and a
+student's confident framing. Next: a subtle-mistake set run through both (L0d). If LLMs catch those too, Lean's value
+is the guarantee and the counterexample, not catching more, and the product should lean on that.

@@ -1,5 +1,6 @@
 """Mellow backend. Holds every API key; the browser never calls an LLM or recognition vendor directly."""
 import hmac
+import json
 import re
 import time
 from typing import Literal
@@ -58,6 +59,23 @@ def _lean_available():
         raise HTTPException(503, f"Lean isn't set up at {lean.LEAN_DIR} (see README: Lean)")
 
 
+class EventRequest(BaseModel):
+    # shortcut: check_id isn't on request_log, so a check's model calls are joined to its events by user and time.
+    # Upgrade path: send check_id as a header and log it with every call.
+    event: Literal["check_started", "statement_rejected", "check_result", "abandoned", "next_step", "feedback"]
+    check_id: str = Field("", max_length=64)
+    data: dict = Field(default_factory=dict)
+
+
+@app.post("/event", status_code=204)
+def event_route(req: EventRequest, x_mellow_user: str | None = Header(None)):
+    """What a student does around a check, for the friends test: logged, never used to judge anything."""
+    user = user_id(x_mellow_user)
+    if len(json.dumps(req.data)) > 4000:
+        raise HTTPException(413, "event data too large")
+    store.event(user, req.check_id, req.event, req.data)
+
+
 class StatementRequest(BaseModel):
     problem: str = Field(min_length=1, max_length=2000)
     confirmed: Literal[True]  # confirm-before-judge: the problem's reading is the student's
@@ -89,7 +107,7 @@ class LeanCheckRequest(BaseModel):
 
 
 class LineVerdict(BaseModel):
-    verdict: Literal["proved", "skipped step", "wrong reason", "not proved", "unchecked"]
+    verdict: Literal["proved", "skipped step", "wrong reason", "false", "not proved", "unchecked"]
     message: str
     lean: list[str]  # what the line became in Lean
 
@@ -111,7 +129,8 @@ def lean_check_route(req: LeanCheckRequest, x_mellow_user: str | None = Header(N
     # A statement is binders and a type: `:=` or a new line could smuggle in a proof of its own.
     if lean.FORBIDDEN.search(req.statement) or leancheck.SPOOF.search(req.statement) or re.search(r":=|\n", req.statement):
         raise HTTPException(400, "the statement contains something Lean isn't allowed to run")
-    key = llm.cache_key("lean_check", {"statement": req.statement, "lines": lines}, config.LEAN_MODEL)
+    key = llm.cache_key("lean_check", {"statement": req.statement, "lines": lines, "v": leancheck.RESULT_VERSION},
+                        config.LEAN_MODEL)
     if (hit := store.cache_get(key)) is not None:
         return hit
     t = time.time()

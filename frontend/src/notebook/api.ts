@@ -15,16 +15,14 @@ function userId(): string {
 const urlKey = new URLSearchParams(location.search).get('key');
 if (urlKey) localStorage.setItem('mellow.key', urlKey);
 
+const headers = () => ({
+  'Content-Type': 'application/json',
+  'X-Mellow-User': userId(),
+  'X-Mellow-Key': localStorage.getItem('mellow.key') ?? '',
+});
+
 async function post<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`/api${path}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Mellow-User': userId(),
-      'X-Mellow-Key': localStorage.getItem('mellow.key') ?? '',
-    },
-    body: JSON.stringify(body),
-  });
+  const res = await fetch(`/api${path}`, { method: 'POST', headers: headers(), body: JSON.stringify(body) });
   if (!res.ok) {
     const detail = await res.json().then((d) => d.detail, () => res.statusText);
     throw new Error(typeof detail === 'string' ? detail : `Request failed (${res.status})`);
@@ -42,7 +40,7 @@ export interface Reading {
 /** The problem as Lean states it, and what that says in words (from a second model that sees only the Lean). */
 export interface Statement { statement: string; in_words: string }
 
-export type LineVerdict = 'proved' | 'skipped step' | 'wrong reason' | 'not proved' | 'unchecked';
+export type LineVerdict = 'proved' | 'skipped step' | 'wrong reason' | 'false' | 'not proved' | 'unchecked';
 export interface LeanCheck {
   lines: { verdict: LineVerdict; message: string; lean: string[] }[];
   complete: boolean;
@@ -56,4 +54,10 @@ export const api = {
   statement: (problem: string) => post<Statement>('/lean/statement', { problem, confirmed: true }),
   leanCheck: (statement: string, lines: string[]) =>
     post<LeanCheck>('/lean/check', { statement, lines, confirmed: true }),
+  /** What the student does around a check, for the friends test (PROJECT.md §11). Fire and forget; `keepalive`
+   * lets it leave while the tab closes (sendBeacon can't send our headers). */
+  event: (event: string, checkId: string, data: Record<string, unknown> = {}) => {
+    fetch('/api/event', { method: 'POST', headers: headers(), keepalive: true,
+      body: JSON.stringify({ event, check_id: checkId, data }) }).catch(() => {});
+  },
 };

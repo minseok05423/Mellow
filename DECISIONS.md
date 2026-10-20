@@ -317,3 +317,18 @@ Caddy for HTTPS on an sslip.io name, so no domain is needed, and HTTPS is requir
 works on secure pages). A shared access code in the invite link guards the API, because the anonymous per-browser
 caps alone let anyone with the URL spend the LLM budget by clearing storage. Revisit native only if Pencil latency in
 Safari fails the user test.
+
+## 30. Counterexamples Lean checks, and verdicts that never overclaim
+
+All four reviewers in the 2026-10-20 product discussion (PROJECT.md §11) asked to tell "false" from "couldn't verify".
+When the automation and the model both fail on a claim, the model may answer with values instead of a proof. We build
+the statement ourselves from Lean's own printout of the context at that line (an error raised on purpose inside a
+`True` block, which leaves nothing behind): `∃ variables, every hypothesis ∧ ¬ claim`. Lean must prove it with the
+model's values, `#print axioms` must show no sorry, and inside the real proof every hypothesis as we re-typed it must
+read back as the real one, so a weaker reprint can't make a true claim look false. The model only proposes; Lean
+decides, as with every verdict. Values are shown bare ("fails for k = 1, m = 1": working out why is the learning, the
+student said); at 0 the card asks "did you mean to rule that out?", because Lean's 1/0 = 0 and ℕ's 0 − 1 = 0 make
+claims false there that a student meant to exclude. Nothing new runs inside a proof by contradiction. With it, the
+card stops overclaiming: a step the model filled is a gap (⋯), never ✓ or "complete"; a ✓ resting on an unverified
+line says so; and when the automation proves the whole theorem alone, the card says the size of the steps wasn't
+judged. The context printout adds one Lean error per claim but no extra run or model call.

@@ -1,7 +1,8 @@
 """Lean checking (app/leancheck.py) without Lean or a model: assembling the file, mapping errors back to lines,
 rejecting proofs."""
-from app.leancheck import (Item, StepProof, StepProofs, Translation, assemble, hypotheses, problems_check,
-                            proofs_check, under_contradiction, verdicts)
+from app.leancheck import (Item, StepProof, StepProofs, Translation, Value, assemble, context_entries, hypotheses,
+                            problems_check, proofs_check, proved_decls, refutation_statement, under_contradiction,
+                            verdicts)
 
 STATEMENT = "(a b : ℤ) (ha : Even a) (hb : Even b) : Even (a + b)"
 ITEMS = [Item(line=0, kind="tactic", text="obtain ⟨k, hk⟩ := ha"),
@@ -26,10 +27,12 @@ def test_assemble_maps_lines_and_puts_a_marker_after_each_item():
     lines = src.splitlines()
     assert lines[4].startswith("theorem target")
     assert lines[5:7] == ["  obtain ⟨k, hk⟩ := ha", '  trace "mellow 0"'] and where[6] == (0, "tactic", 0)
-    have = lines[7]
+    # Before each claim, Lean prints its context as an error inside a `True` block.
+    assert lines[7] == '  have _ctx1 : True := by fail "mellow ctx"' and where[8] == (1, "ctx", 0)
+    have = lines[8]
     assert have.startswith("  have h1 : a + b = 2 * k := by first | (omega; done)")
-    assert where[8] == (1, "claim", have.index("by first"))
-    assert lines[9:12] == [lines[9], "  exact h2", '  trace "mellow 2"'] and where[11] == (2, "exact", 0)
+    assert where[9] == (1, "claim", have.index("by first"))
+    assert lines[11:14] == [lines[11], "  exact h2", '  trace "mellow 2"'] and where[13] == (2, "exact", 0)
     assert markers == {0: [0], 1: [1], 2: [2]}
 
 
@@ -46,10 +49,10 @@ def test_reason_check_clears_uncited_hypotheses_inside_a_true_block():
     items = [Item(line=0, kind="have", text="Even a", name="h0", reasons=["ha"])]
     src, where, _ = assemble(STATEMENT, items)
     lines = src.splitlines()
-    assert lines[5] == "  have _reason0 : True := by"
-    assert lines[6].startswith("    have _r : Even a := by (try clear a); (try clear b); (try clear hb); first |")
-    assert lines[7] == "    trivial" and lines[8].startswith("  have h0 : Even a := by first")
-    assert {where[n][1] for n in (6, 7, 8)} == {"reason"}
+    assert lines[6] == "  have _reason0 : True := by"
+    assert lines[7].startswith("    have _r : Even a := by (try clear a); (try clear b); (try clear hb); first |")
+    assert lines[8] == "    trivial" and lines[9].startswith("  have h0 : Even a := by first")
+    assert {where[n][1] for n in (7, 8, 9)} == {"reason"}
 
 
 def test_model_proofs_replace_the_automation_for_that_claim():
@@ -132,3 +135,63 @@ def test_a_typed_assumption_that_misses_the_goal_is_not_sent_back_for_a_retry():
            "  x = y\ndue to the provided type annotation\n")
     v = verdicts(out, where, markers, items, 1)
     assert v["lines"] == ["not proved"] and v["structural"] == []
+
+
+CTX = "mellow ctx\na b k : ℤ\nhk : a = k + k\n_ctx0 : True\nm : ℤ\nhm :\n  b =\n    m + m\n⊢ True"
+
+
+def test_context_entries_read_lean_printout_and_refuse_what_cant_be_typed_back():
+    assert context_entries(CTX) == [(["a", "b", "k"], "ℤ"), (["hk"], "a = k + k"), (["m"], "ℤ"), (["hm"], "b = m + m")]
+    assert context_entries("mellow ctx\nn✝ : ℕ\n⊢ True") is None
+    assert context_entries("mellow ctx\nx : ℕ := 5\n⊢ True") is None
+
+
+def test_refutation_statement_binds_the_values_and_keeps_every_hypothesis():
+    entries = context_entries(CTX)
+    st = refutation_statement("a + b = 2 * (k * m)", entries, {"a": "2", "b": "2", "k": "1", "m": "1"})
+    assert st == ("∃ (a b k : ℤ) (m : ℤ), (a = k + k) ∧ (b = m + m) ∧ ¬ (a + b = 2 * (k * m))", ["2", "2", "1", "1"])
+    assert refutation_statement("P", entries, {"a": "2"}) is None  # part of `a b k` only
+
+
+def test_counterexamples_are_their_own_theorems_and_need_a_faithful_context():
+    items = ITEMS[:2]
+    ref = {1: {"entries": [(["k"], "ℤ"), (["hk"], "a = k + k")], "values": {"k": "1"}, "check": "norm_num"}}
+    src, where, markers = assemble(STATEMENT, items, refutations=ref)
+    lines = src.splitlines()
+    faith = where_of(src, "have _faith1")
+    assert lines[faith:faith + 3] == ["    have _ : ℤ := k", "    have _ : a = k + k := hk", "    trivial"]
+    n = lines.index("theorem cex_1 : ∃ (k : ℤ), (a = k + k) ∧ ¬ (a + b = 2 * k) := by") + 1
+    assert lines[n:n + 3] == ["  refine ⟨(1), ?_⟩", "  norm_num", "#print axioms cex_1"] and where[n][1] == "cex"
+    h1 = where_of(src, "have h1")
+    failed = f"mellow 0\nx.lean:{h1}:{where[h1][2]}: error: unsolved goals\n⊢ False\nmellow 1\n"
+    proved = "'cex_1' depends on axioms: [propext]\n"
+    assert verdicts(failed + proved, where, markers, items, 2)["lines"] == ["proved", "false"]
+    # Not proved, proved with sorry, or a hypothesis that didn't read back: the line stays "not proved".
+    assert verdicts(failed, where, markers, items, 2)["lines"][1] == "not proved"
+    assert verdicts(failed + "'cex_1' depends on axioms: [sorryAx]\n", where, markers, items, 2)["lines"][1] == "not proved"
+    bad_faith = f"x.lean:{faith + 1}:4: error: type mismatch\n"
+    assert verdicts(failed + bad_faith + proved, where, markers, items, 2)["lines"][1] == "not proved"
+
+
+def test_proved_decls_reads_print_axioms():
+    out = "'cex_1' depends on axioms: [propext,\n Classical.choice]\n'cex_2' depends on axioms: [sorryAx]\n" \
+          "'trivial_check' does not depend on any axioms\n"
+    assert proved_decls(out) == {"cex_1", "trivial_check"}
+
+
+def test_counterexample_values_must_be_single_terms():
+    ok = StepProof(index=1, counterexample=[Value(name="k", value="fun x => x + 1")], check="norm_num")
+    assert proofs_check(StepProofs(proofs=[ok]), {1}) == []
+    for v in ["1, ?_⟩", "1\n  sorry", "1; exact h", "by sorry"]:
+        bad = StepProof(index=1, counterexample=[Value(name="k", value=v)])
+        assert proofs_check(StepProofs(proofs=[bad]), {1}), v
+
+
+def test_only_our_own_message_counts_as_a_context_printout():
+    src, where, markers = assemble(STATEMENT, ITEMS)
+    ctx = where_of(src, "have _ctx1")
+    v = verdicts(f"mellow 0\nx.lean:{ctx}:2: error: mellow ctx\nk : ℤ\n⊢ True\nmellow 1\nmellow 2\n", where, markers, ITEMS, 3)
+    assert v["lines"] == ["proved"] * 3 and v["contexts"] == {1: "mellow ctx\nk : ℤ\n⊢ True"}
+    # After the goal is closed, the next claim's first tactic fails with "no goals": a structural error, for a retry.
+    v = verdicts(f"mellow 0\nx.lean:{ctx}:2: error: no goals to be proved\n", where, markers, ITEMS, 3)
+    assert v["lines"][1] == "not proved" and "no goals" in v["structural"][0]

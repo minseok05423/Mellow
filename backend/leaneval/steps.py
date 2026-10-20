@@ -36,12 +36,13 @@ def check(statement: str, lines: list[str], model: str) -> dict:
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--cases", default="steps.json", help="steps.json (L0b) or subtle.json (L0d)")
     ap.add_argument("--models", default="claude-sonnet-5-5")
     ap.add_argument("--only", default="")
     args = ap.parse_args()
     config.CAPS["lean"] = 10_000  # an experiment, not a student: the daily cap doesn't apply
     statements = {p["id"]: p["lean"] for p in json.loads((HERE / "problems.json").read_text())}
-    cases = json.loads((HERE / "steps.json").read_text())
+    cases = json.loads((HERE / args.cases).read_text())
     if args.only:
         cases = [c for c in cases if c["id"] in args.only.split(",")]
     models = [m for m in args.models.split(",") if config.llm_configured(m)]
@@ -52,7 +53,7 @@ def main():
             statement = statements[c.get("problem", c["id"])]
             r = {"id": c["id"], "model": model, "wrong_line": c["wrong_line"], "mistake": c["mistake"],
                  "correct": check(statement, c["correct"], model), "wrong": check(statement, c["wrong"], model)}
-            r["caught"] = r["wrong"]["lines"][c["wrong_line"]] in ("not proved", "wrong reason")
+            r["caught"] = r["wrong"]["lines"][c["wrong_line"]] in ("not proved", "wrong reason", "false")
             r["false_tick"] = r["wrong"]["lines"][c["wrong_line"]] in ("proved", "skipped step")
             results.append(r)
             ok = r["correct"]["lines"]
@@ -71,7 +72,8 @@ def main():
 
     lines = ["# Lean L0b results: line-by-line checking", "",
              "| model | correct lines ✓ (skipped step) | automation only (after retries) | correct proofs fully ✓ "
-             "| false alarms on correct lines | planted mistakes caught | false ✓ | median s per proof | cost (USD) |",
+             "| false alarms on correct lines | planted mistakes caught (with a counterexample) | false ✓ "
+             "| median s per proof | cost (USD) |",
              "|---|---|---|---|---|---|---|---|---|"]
     for m in models:
         rs = [r for r in results if r["model"] == m]
@@ -80,8 +82,9 @@ def main():
         good = ("proved", "skipped step")
         full = sum(all(v in good for v in r["correct"]["lines"]) and not r["correct"].get("unfinished") for r in rs)
         lines.append(f"| {m} | {sum(v in good for v in ls)}/{len(ls)} ({ls.count('skipped step')}) "
-                     f"| {first.count('proved')}/{len(first)} | {full}/{len(rs)} | {ls.count('wrong reason')} "
-                     f"| {sum(r['caught'] for r in rs)}/{len(rs)} | {sum(r['false_tick'] for r in rs)} "
+                     f"| {first.count('proved')}/{len(first)} | {full}/{len(rs)} | {ls.count('wrong reason') + ls.count('false')} "
+                     f"| {sum(r['caught'] for r in rs)}/{len(rs)} "
+                     f"({sum(r['wrong']['lines'][r['wrong_line']] == 'false' for r in rs)}) | {sum(r['false_tick'] for r in rs)} "
                      f"| {median(x['seconds'] for r in rs for x in (r['correct'], r['wrong']))} | {cost(m, since)} |")
     lines += ["", "\"unchecked\" means Lean never saw the line (a parse error, a translation that ended the proof, or no "
               "translation), so a planted mistake that is unchecked is neither caught nor a false ✓. \"skipped step\": "

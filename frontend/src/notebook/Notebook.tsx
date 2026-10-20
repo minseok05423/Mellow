@@ -17,6 +17,7 @@ import {
 import 'katex/dist/katex.min.css';
 import 'katex/contrib/copy-tex'; // copying rendered math gives its LaTeX source
 import 'tldraw/tldraw.css';
+import { api } from './api';
 import { CheckUI, ReadingsOverlay } from './CheckUI';
 import { FeedbackShapeUtil, LegacySceneShapeUtil } from './feedback';
 import { recordInk } from './ink';
@@ -89,6 +90,10 @@ function TopBar({ nb }: { nb: NotebookMeta }) {
         title="Show what the board reads under each line">
         Readings {readingsOn ? 'on' : 'off'}
       </button>
+      <button title="Tell us what worked or didn't" onClick={() => {
+        const text = window.prompt('What worked, what didn\'t, what confused you?')?.trim();
+        if (text) api.event('feedback', '', { text: text.slice(0, 3000) });
+      }}>Feedback</button>
     </div>
   );
 }

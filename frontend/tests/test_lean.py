@@ -58,7 +58,7 @@ def write_line(page, y):
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)
     page = browser.new_page(viewport={"width": 1280, "height": 900})
-    errors, sent = [], {}
+    errors, sent, events = [], {"n_statement": 0}, []
     page.on("pageerror", lambda e: errors.append(str(e)))
     # A 503 from a test that fails the statement on purpose is expected; anything else is an error.
     page.on("console", lambda m: m.type == "error" and "503" not in m.text and errors.append(m.text))
@@ -67,6 +67,7 @@ with sync_playwright() as p:
     if not REAL:
         def statement(route):
             sent["statement"] = json.loads(route.request.post_data)
+            sent["n_statement"] += 1
             if sent.get("fail_statement"):
                 return route.fulfill(status=503, json={"detail": "no key for the Lean model (claude-sonnet-5-5)"})
             route.fulfill(json=STATEMENT)
@@ -77,6 +78,7 @@ with sync_playwright() as p:
                                 "complete": False, "message": "Look again at line 3.", "seconds": 9})
         page.route("**/api/lean/statement", statement)
         page.route("**/api/lean/check", lean_check)
+        page.route("**/api/event", lambda r: (events.append(json.loads(r.request.post_data)), r.fulfill(status=204)))
 
     page.goto(URL)
     page.click("text=+ New notebook")
@@ -92,6 +94,9 @@ with sync_playwright() as p:
     buttons = page.locator(".action-bar button").all_inner_texts()
     check(buttons == ["Check with Lean"], f"the only action is Check with Lean ({buttons})")
     page.click("text=Check with Lean")
+    chip_x = page.locator(".chip").bounding_box()["x"]
+    sel_right = js(page, "return editor.getSelectionScreenBounds().maxX")
+    check(chip_x >= sel_right, f"the box sits beside the ink, not on it ({chip_x} >= {sel_right})")
 
     # --- confirm box: 5 rows, empty readings open for typing, the first line starts as the problem ---
     inputs = page.locator(".chip .chip-edit input")
@@ -125,6 +130,8 @@ with sync_playwright() as p:
     # --- "Not what I meant" goes back to the readings, which are kept ---
     page.click("text=Not what I meant")
     check(page.locator(".chip .chip-read").count() == 5, "back to the five readings")
+    if not REAL:
+        check([e["event"] for e in events] == ["statement_rejected"], f"the rejection is logged ({events})")
     page.click("text=Looks right, next")
     page.wait_for_selector("text=Yes, check my proof", timeout=180_000)
 
@@ -143,6 +150,28 @@ with sync_playwright() as p:
     check(page.locator(".chip").count() == 0, "the box closes")
     page.wait_for_timeout(300)
     page.screenshot(path=f"{OUT}/lean_card.png")
+
+    # --- after a ✗ or ?, one optional question; the check and the answer are logged ---
+    page.wait_for_selector(".ask")
+    page.click(".ask >> text=Fix it")
+    check(page.locator(".ask").count() == 0, "the question goes away once answered")
+    if not REAL:
+        page.wait_for_timeout(300)
+        names = [e["event"] for e in events]
+        check(names == ["statement_rejected", "check_started", "check_result", "next_step"], f"events logged ({names})")
+        check(events[2]["data"]["verdicts"] == {"proved": 3, "not proved": 1}, f"verdict counts ({events[2]['data']})")
+        check(events[3]["data"] == {"answer": "Fix it"} and len({e["check_id"] for e in events}) == 1,
+              "the answer belongs to the same check")
+
+        # --- the same proof again: readings shown, the confirmed statement reused (no second wait) ---
+        js(page, "editor.setCurrentTool('lasso-select')")
+        stroke(page, [(100, 170), (290, 170), (290, 480), (100, 480), (100, 172)])
+        page.wait_for_selector(".action-bar")
+        page.click("text=Check with Lean")
+        check(page.locator(".chip .chip-read").count() == 5, "the readings are shown again")
+        page.click("text=Check again")
+        page.wait_for_function("window.editor.getCurrentPageShapes().filter(s => s.type === 'mellow-feedback').length == 2")
+        check(sent["n_statement"] == 3, f"no new statement request ({sent['n_statement']})")
 
     # --- an old notebook's animated explanation still loads, as a plain card ---
     js(page, "editor.createShape({type: 'mellow-scene', x: 600, y: 900, props: {w: 300, h: 100, scene: '{}', "

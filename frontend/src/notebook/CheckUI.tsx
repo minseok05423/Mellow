@@ -89,14 +89,18 @@ interface ChipState {
   typedProblem: string; // the problem, when none of the selected lines is it
   step: 'readings' | 'stating' | 'statement' | 'checking';
   statement: Statement | null;
+  id: string; // ties this check's events together
 }
 
+// A gap (the model filled a step) and a wrong reason aren't ✓: only a line Lean checked as written is.
 const ICON: Record<LineVerdict, string> = {
-  proved: '✓', 'skipped step': '✓', 'wrong reason': '✗', 'not proved': '?', unchecked: '–',
+  proved: '✓', 'skipped step': '⋯', 'wrong reason': '~', false: '✗', 'not proved': '?', unchecked: '–',
 };
 
 // The problem last stated in this tab, so the next check on it needn't be typed again.
 let lastProblem = '';
+// Statements the student confirmed, by problem: checking the same problem again skips that confirm and its wait.
+const confirmedStatements = new Map<string, Statement>();
 
 /** The "Check with Lean" button next to selected lines, and the confirm box (screen space, InFrontOfTheCanvas). */
 export function CheckUI() {
@@ -105,7 +109,17 @@ export function CheckUI() {
   const [error, setError] = useState('');
   const [seconds, setSeconds] = useState(0);
   const chipRef = useRef<HTMLDivElement>(null);
+  // After a ✗ or ?, one optional question: what the student does next is the friends test's key signal.
+  const [ask, setAsk] = useState<string | null>(null);
   const busy = chip?.step === 'stating' || chip?.step === 'checking';
+
+  // Leaving during a wait is the strongest sign the wait is too long.
+  useEffect(() => {
+    if (!busy || !chip) return;
+    const left = () => document.hidden && api.event('abandoned', chip.id, { step: chip.step });
+    document.addEventListener('visibilitychange', left);
+    return () => document.removeEventListener('visibilitychange', left);
+  }, [busy, chip?.id, chip?.step]);
 
   // A live count while Lean works: a check takes 10 s to a minute.
   // shortcut: elapsed time only. Upgrade path: stream each line's verdict as Lean reaches it.
@@ -141,7 +155,8 @@ export function CheckUI() {
     // Usually the problem is written first: with several lines selected, the first one starts as the problem.
     setChip({ lines: sel, texts: sel.map((l) => readings[l.key]?.latex ?? ''),
       roles: sel.map((_, i) => (i === 0 && sel.length > 1 ? 'problem' : 'proof')),
-      typedProblem: lastProblem, step: 'readings', statement: null });
+      typedProblem: lastProblem, step: 'readings', statement: null, id: crypto.randomUUID() });
+    setAsk(null);
   }
 
   const texts = chip?.texts.map((t) => t.trim()) ?? [];
@@ -159,6 +174,8 @@ export function CheckUI() {
         confirmed: true });
     });
     setError('');
+    const known = confirmedStatements.get(problem);
+    if (known) return check({ ...chip, statement: known });
     setChip({ ...chip, step: 'stating' });
     try {
       const statement = await api.statement(problem);
@@ -170,16 +187,22 @@ export function CheckUI() {
     }
   }
 
-  async function check() {
-    if (!chip?.statement) return;
+  async function check(c = chip) {
+    if (!c?.statement) return;
+    const statement = c.statement;
     setError('');
-    setChip({ ...chip, step: 'checking' });
+    setChip({ ...c, step: 'checking' });
+    confirmedStatements.set(problem, statement);
+    api.event('check_started', c.id, { problem, lines: proof.length, again: c !== chip });
     try {
-      const res = await api.leanCheck(chip.statement.statement, proof);
-      const rows = res.lines.map((l, i) => `${ICON[l.verdict]} ${lineText(proof[i])} — ${l.message}`);
-      const near = Box.Common(chip.lines.filter((_, i) => chip.roles[i] === 'proof').map((l) => l.box));
+      const res = await api.leanCheck(statement.statement, proof);
+      const rows = res.lines.map((l, i) => `${ICON[l.verdict]} ${lineText(proof[i])}${l.message ? ` — ${l.message}` : ''}`);
+      const near = Box.Common(c.lines.filter((_, i) => c.roles[i] === 'proof').map((l) => l.box));
       addFeedback(editor, near, problem, res.complete ? 'lean_complete' : 'lean_issues',
         [...rows, res.message].join('\n'));
+      const counts = res.lines.reduce<Record<string, number>>((n, l) => ({ ...n, [l.verdict]: (n[l.verdict] ?? 0) + 1 }), {});
+      api.event('check_result', c.id, { verdicts: counts, complete: res.complete, seconds: res.seconds });
+      if (res.lines.some((l) => l.verdict === 'false' || l.verdict === 'not proved')) setAsk(c.id);
       setChip(null);
       editor.selectNone();
     } catch (e) {
@@ -199,7 +222,9 @@ export function CheckUI() {
         </div>
       )}
       {chip && (
-        <div className="chip" ref={chipRef} style={{ left: Math.max(8, (target?.x ?? 200) - 120), top: (target?.y ?? 80) + 32 }}
+        // Beside the selection when there's room, so the ink being confirmed stays in view.
+        <div className="chip" ref={chipRef} style={(target?.x ?? 0) + 404 <= window.innerWidth
+          ? { left: target!.x + 16, top: target!.y } : { left: Math.max(8, (target?.x ?? 200) - 120), top: (target?.y ?? 80) + 32 }}
           onPointerDown={(e) => e.stopPropagation()}>
           {chip.step === 'readings' || chip.step === 'stating' ? (
             <>
@@ -238,19 +263,31 @@ export function CheckUI() {
             {chip.step === 'readings' || chip.step === 'stating' ? (
               <button className="primary" disabled={busy || !problem || proof.length === 0} onClick={state}
                 title={proof.length ? '' : 'Mark at least one line as proof'}>
-                {chip.step === 'stating' ? 'Stating…' : 'Looks right, next'}
+                {chip.step === 'stating' ? 'Stating…' : confirmedStatements.has(problem) ? 'Check again' : 'Looks right, next'}
               </button>
             ) : (
               <>
-                <button disabled={busy} onClick={() => setChip({ ...chip, step: 'readings', statement: null })}>
+                <button disabled={busy} onClick={() => {
+                  api.event('statement_rejected', chip.id, { problem, statement: chip.statement!.statement });
+                  setChip({ ...chip, step: 'readings', statement: null });
+                }}>
                   Not what I meant
                 </button>
-                <button className="primary" disabled={busy} onClick={check}>
+                <button className="primary" disabled={busy} onClick={() => check()}>
                   {chip.step === 'checking' ? 'Checking…' : 'Yes, check my proof'}
                 </button>
               </>
             )}
           </div>
+        </div>
+      )}
+      {ask && !chip && (
+        <div className="ask" onPointerDown={(e) => e.stopPropagation()}>
+          <span>What will you do now?</span>
+          {['Fix it', 'Ask ChatGPT or a friend', 'Not sure'].map((a) => (
+            <button key={a} onClick={() => { api.event('next_step', ask, { answer: a }); setAsk(null); }}>{a}</button>
+          ))}
+          <button className="ask-close" aria-label="Close" onClick={() => setAsk(null)}>×</button>
         </div>
       )}
     </EditorPortal>
