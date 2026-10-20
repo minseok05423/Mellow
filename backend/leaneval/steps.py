@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import json
 import time
+from pathlib import Path
 
 from app import config
 from app.leancheck import check as _check
@@ -39,13 +40,19 @@ def main():
     ap.add_argument("--cases", default="steps.json", help="steps.json (L0b) or subtle.json (L0d)")
     ap.add_argument("--models", default="claude-sonnet-5-5")
     ap.add_argument("--only", default="")
+    ap.add_argument("--agent-queue", default="", help="answer model calls with Claude Code agents (leaneval/agentq.py)")
     args = ap.parse_args()
     config.CAPS["lean"] = 10_000  # an experiment, not a student: the daily cap doesn't apply
     statements = {p["id"]: p["lean"] for p in json.loads((HERE / "problems.json").read_text())}
     cases = json.loads((HERE / args.cases).read_text())
     if args.only:
         cases = [c for c in cases if c["id"] in args.only.split(",")]
-    models = [m for m in args.models.split(",") if config.llm_configured(m)]
+    if args.agent_queue:
+        from app import llm
+        from leaneval.agentq import QueueProvider, serialize_lean
+        llm.set_provider(QueueProvider(Path(args.agent_queue)))
+        serialize_lean(HERE / "results" / "lean.lock")
+    models = [m for m in args.models.split(",") if args.agent_queue or config.llm_configured(m)]
 
     results, since = [], time.time()
     for model in models:
@@ -66,7 +73,7 @@ def main():
                   f"{r['wrong']['lines']}",
                   flush=True)
 
-    out = HERE / "results" / time.strftime("steps-%Y%m%d-%H%M%S")
+    out = HERE / "results" / (time.strftime("steps-%Y%m%d-%H%M%S") + (f"-{Path(args.agent_queue).name}" if args.agent_queue else ""))
     out.mkdir(parents=True)
     (out / "results.json").write_text(json.dumps(results, indent=1, ensure_ascii=False))
 
@@ -110,6 +117,8 @@ def main():
                 lines += [f"- {kind}: translation failed", ""]
     (out / "report.md").write_text("\n".join(lines) + "\n")
     print(f"\nwrote {out / 'report.md'}")
+    if args.agent_queue:
+        (Path(args.agent_queue) / "DONE").touch()
 
 
 if __name__ == "__main__":
