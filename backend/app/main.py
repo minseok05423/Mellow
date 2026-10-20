@@ -107,7 +107,7 @@ class LeanCheckRequest(BaseModel):
 
 
 class LineVerdict(BaseModel):
-    verdict: Literal["proved", "skipped step", "wrong reason", "false", "not proved", "unchecked"]
+    verdict: Literal["proved", "skipped step", "wrong reason", "false", "not given", "not proved", "unchecked"]
     message: str
     lean: list[str]  # what the line became in Lean
 

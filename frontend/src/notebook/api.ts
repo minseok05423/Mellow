@@ -40,7 +40,7 @@ export interface Reading {
 /** The problem as Lean states it, and what that says in words (from a second model that sees only the Lean). */
 export interface Statement { statement: string; in_words: string }
 
-export type LineVerdict = 'proved' | 'skipped step' | 'wrong reason' | 'false' | 'not proved' | 'unchecked';
+export type LineVerdict = 'proved' | 'skipped step' | 'wrong reason' | 'false' | 'not given' | 'not proved' | 'unchecked';
 export interface LeanCheck {
   lines: { verdict: LineVerdict; message: string; lean: string[] }[];
   complete: boolean;

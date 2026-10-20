@@ -332,3 +332,22 @@ claims false there that a student meant to exclude. Nothing new runs inside a pr
 card stops overclaiming: a step the model filled is a gap (⋯), never ✓ or "complete"; a ✓ resting on an unverified
 line says so; and when the automation proves the whole theorem alone, the card says the size of the steps wasn't
 judged. The context printout adds one Lean error per claim but no extra run or model call.
+
+## 31. Lean checks the student's reason, not just the claim
+
+L0d (PROJECT.md §11) showed the gap the instructor reviewer predicted: Lean asked "is this line true, given
+everything above?", while a grader asks "does it follow from the reason given?". Subtle mistakes have true claims, so
+8 of 11 passed (an LLM grading alone passed 0 of 33). Three changes, each keeping Lean as the judge:
+(1) A line that gives a reason ("since", "because", "so", "hence") must follow from the facts that reason consists of,
+with everything else removed (`clear * -`); the translator lists those facts (including the fact a reason is applied
+to, and the line before a "so"), and like a claim, the check gets the model's proof or a counterexample when the
+automation fails. Citing the end of a chain ("c = bm = (ak)m = a(km)", even continued on the next line) cites the
+chain, found by matching each link's left side to the previous right side, not by line: in "P, so Q", a later "so"
+draws on Q alone. (2) "Suppose X" is always an assumption (`intro (h : X)`), never a claim. (3) An intro Lean rejects
+because the goal offers nothing there, or a different hypothesis, is the student's mistake ("not given": assuming the
+conclusion, the next case of an induction, a variable before the choice that depends on it), unless only the
+statement's own variables were re-introduced, which is the translation's slip and goes back for a retry. With (1),
+L0d went from 3 to 7 of 11 caught; (2) and (3) are unmeasured (API credit ran out). What Lean still can't see: a
+reason that is sufficient but not the student's argument (n³ − n = (n − 1)n(n + 1) does give 3 ∣ n³ − n, whatever the
+student said about evenness), and a true claim reached by an invalid step (2xy ≤ x² + y² is true outright): those show
+as a gap, "needs a step you didn't write", and the proof is never called complete.

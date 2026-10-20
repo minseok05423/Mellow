@@ -486,3 +486,36 @@ can't be the pitch on this evidence. What would show it: subtle mistakes (quanti
 by something that may be zero, assuming the conclusion), real student mistakes, photos instead of text, and a
 student's confident framing. Next: a subtle-mistake set run through both (L0d). If LLMs catch those too, Lean's value
 is the guarantee and the counterexample, not catching more, and the product should lean on that.
+
+### 2026-10-20: L0d, subtle mistakes (`backend/leaneval/subtle.json`), and the fix
+Eleven subtle mistakes, each with a correct version: a reused witness letter, an expansion slip that keeps the right
+conclusion, a sign error, |x + y| = |x| + |y|, "or" for "and" in De Morgan, an induction run backwards, "even" for
+"divisible by 3", δ chosen after x, starting from the conclusion, and two the automation might wave through (a
+missing case, coprimality never used).
+
+| | wrong proofs passed | correct proofs rejected | cost |
+|---|---|---|---|
+| Claude Sonnet alone (3 runs each) | 0/33 | 0/33 | $0.33 |
+| Claude Haiku alone | 0/33 | 3/33 | $0.02 |
+| Sonnet alone, student says "my TA marked it correct" | 0/33 | 0/33 | $0.21 |
+| Sonnet alone, student pushes back on a flagged line | 0/33 | 0/33 | $0.40 |
+| Haiku alone, pushback | 1/33 | 6/33 | $0.03 |
+| Lean checking, before the fix | 8/11 not caught (5 as a gap ⋯, 3 as ✓) | 0 of 40 lines | $0.71 |
+| Lean checking, reasons checked (DECISIONS #31 (1)) | 4/11 not caught (3 gaps, 1 ✓ before (2)–(3)) | 1 line, since fixed | $1.36 |
+
+**What this says.** On text, an LLM grading alone catches these mistakes, and Sonnet doesn't give in to a student's
+pressure. Lean only checked whether each line was *true*; subtle mistakes have true lines. Checking each line from the
+reason the student gives (DECISIONS #31) closed most of the gap. Lean's remaining blind spot is a true claim reached by
+a wrong argument when the cited facts happen to suffice; those show as a gap, never as "complete".
+
+**So what is Lean for?** Not catching more than an LLM on clean text: on this evidence it doesn't. What it adds is
+(a) values that provably break a false line, (b) verdicts that can't drift or be talked out of, which matters for an
+instructor's trust and a graded setting more than for a student, and (c) a hard floor: no "complete" without every
+line machine-checked. The honest pitch is "every ✓ is checked by a proof assistant, and every ✗ comes with numbers you
+can try". Whether students value that over ChatGPT's explanations is exactly what the friends test must show. What
+would change the picture: photos of real handwriting (where LLM reading errors compound), real student mistakes, and
+longer proofs. Open question for the user: should an LLM's opinion ("this reasoning looks invalid") be shown
+alongside Lean's verdict, labelled as unverified? That would break the "an LLM never judges alone" rule as written.
+
+**Stopped by:** the Anthropic API credit ran out at 13:52 (today's experiments: about $6.20). Still to measure after a
+top-up: L0b and L0d with all of #31, to confirm no new false alarms on correct proofs.

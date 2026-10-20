@@ -94,7 +94,7 @@ interface ChipState {
 
 // A gap (the model filled a step) and a wrong reason aren't ✓: only a line Lean checked as written is.
 const ICON: Record<LineVerdict, string> = {
-  proved: '✓', 'skipped step': '⋯', 'wrong reason': '~', false: '✗', 'not proved': '?', unchecked: '–',
+  proved: '✓', 'skipped step': '⋯', 'wrong reason': '~', false: '✗', 'not given': '✗', 'not proved': '?', unchecked: '–',
 };
 
 // The problem last stated in this tab, so the next check on it needn't be typed again.

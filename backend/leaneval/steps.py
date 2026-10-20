@@ -53,13 +53,17 @@ def main():
             statement = statements[c.get("problem", c["id"])]
             r = {"id": c["id"], "model": model, "wrong_line": c["wrong_line"], "mistake": c["mistake"],
                  "correct": check(statement, c["correct"], model), "wrong": check(statement, c["wrong"], model)}
-            r["caught"] = r["wrong"]["lines"][c["wrong_line"]] in ("not proved", "wrong reason", "false")
-            r["false_tick"] = r["wrong"]["lines"][c["wrong_line"]] in ("proved", "skipped step")
+            r["caught"] = r["wrong"]["lines"][c["wrong_line"]] in ("not proved", "wrong reason", "false", "not given")
+            # A gap (⋯, "needs a step you didn't write") flags the line but doesn't call it wrong; the card never says
+            # "complete" with one. Only a plain ✓ on the planted line is a false ✓.
+            r["gap"] = r["wrong"]["lines"][c["wrong_line"]] == "skipped step"
+            r["false_tick"] = r["wrong"]["lines"][c["wrong_line"]] == "proved"
             results.append(r)
             ok = r["correct"]["lines"]
             print(f"{model:20} {c['id']:18} correct: {sum(v in ('proved', 'skipped step') for v in ok)}/{len(ok)} ✓ {ok}"
                   f"{' (unfinished)' if r['correct'].get('unfinished') else ''}  mistake "
-                  f"{'caught' if r['caught'] else 'FALSE ✓' if r['false_tick'] else 'unchecked'}: {r['wrong']['lines']}",
+                  f"{'caught' if r['caught'] else 'gap ⋯' if r['gap'] else 'FALSE ✓' if r['false_tick'] else 'unchecked'}: "
+                  f"{r['wrong']['lines']}",
                   flush=True)
 
     out = HERE / "results" / time.strftime("steps-%Y%m%d-%H%M%S")
@@ -72,9 +76,9 @@ def main():
 
     lines = ["# Lean L0b results: line-by-line checking", "",
              "| model | correct lines ✓ (skipped step) | automation only (after retries) | correct proofs fully ✓ "
-             "| false alarms on correct lines | planted mistakes caught (with a counterexample) | false ✓ "
+             "| false alarms on correct lines | planted mistakes caught (with a counterexample) | flagged as a gap | false ✓ "
              "| median s per proof | cost (USD) |",
-             "|---|---|---|---|---|---|---|---|---|"]
+             "|---|---|---|---|---|---|---|---|---|---|"]
     for m in models:
         rs = [r for r in results if r["model"] == m]
         ls = [v for r in rs for v in r["correct"]["lines"]]
@@ -84,7 +88,8 @@ def main():
         lines.append(f"| {m} | {sum(v in good for v in ls)}/{len(ls)} ({ls.count('skipped step')}) "
                      f"| {first.count('proved')}/{len(first)} | {full}/{len(rs)} | {ls.count('wrong reason') + ls.count('false')} "
                      f"| {sum(r['caught'] for r in rs)}/{len(rs)} "
-                     f"({sum(r['wrong']['lines'][r['wrong_line']] == 'false' for r in rs)}) | {sum(r['false_tick'] for r in rs)} "
+                     f"({sum(r['wrong']['lines'][r['wrong_line']] == 'false' for r in rs)}) | {sum(r['gap'] for r in rs)} "
+                     f"| {sum(r['false_tick'] for r in rs)} "
                      f"| {median(x['seconds'] for r in rs for x in (r['correct'], r['wrong']))} | {cost(m, since)} |")
     lines += ["", "\"unchecked\" means Lean never saw the line (a parse error, a translation that ended the proof, or no "
               "translation), so a planted mistake that is unchecked is neither caught nor a false ✓. \"skipped step\": "

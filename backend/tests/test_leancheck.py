@@ -45,14 +45,29 @@ def test_block_openers_get_their_marker_inside_the_block():
     assert markers[0] == [0, 1]  # the `with` line is vouched for by the next marker
 
 
-def test_reason_check_clears_uncited_hypotheses_inside_a_true_block():
+def test_reason_check_keeps_only_the_cited_facts_inside_a_true_block():
     items = [Item(line=0, kind="have", text="Even a", name="h0", reasons=["ha"])]
     src, where, _ = assemble(STATEMENT, items)
     lines = src.splitlines()
-    assert lines[6] == "  have _reason0 : True := by"
-    assert lines[7].startswith("    have _r : Even a := by (try clear a); (try clear b); (try clear hb); first |")
-    assert lines[8] == "    trivial" and lines[9].startswith("  have h0 : Even a := by first")
-    assert {where[n][1] for n in (7, 8, 9)} == {"reason"}
+    assert lines[6:9] == ["  have _reason0 : True := by", "    have _r : Even a := by", "      clear * - ha"]
+    assert lines[9] == '      have _rctx : True := by fail "mellow ctx"' and where[10] == (0, "rctx", 0)
+    assert lines[10].startswith("      first | (omega; done)") and lines[11] == "    trivial"
+    assert lines[12].startswith("  have h0 : Even a := by first")
+    assert {where[n][1] for n in (7, 8, 9, 11, 12)} == {"reason"}
+    # The model's proof from the cited facts replaces the automation there.
+    src, _, _ = assemble(STATEMENT, items, reason_proofs={0: "exact ha"})
+    assert src.splitlines()[10] == "      exact ha"
+
+
+def test_reasons_may_cite_any_fact_in_scope_before_the_line():
+    hyps = hypotheses(STATEMENT)
+    items = [Item(line=0, kind="tactic", text="obtain ⟨k, hk⟩ := ha"),
+             Item(line=1, kind="have", text="a = 2 * k", name="h1", reasons=["hk"]),
+             Item(line=2, kind="have", text="Even a", name="h2", reasons=["h1", "hb"])]
+    assert problems_check(Translation(items=items), 3, hyps) == []
+    late = [Item(line=0, kind="have", text="a = 2 * k", name="h1", reasons=["h2"]),
+            Item(line=1, kind="have", text="Even a", name="h2")]
+    assert problems_check(Translation(items=late), 2, hyps)  # h2 isn't in scope yet
 
 
 def test_model_proofs_replace_the_automation_for_that_claim():
@@ -133,8 +148,8 @@ def test_a_typed_assumption_that_misses_the_goal_is_not_sent_back_for_a_retry():
     src, where, markers = assemble("(f : ℕ → ℕ) : Function.Injective f", items)
     out = ("x.lean:6:12: error: Type mismatch: Hypothesis `h` has type\n  f x = f y\nbut is expected to have type\n"
            "  x = y\ndue to the provided type annotation\n")
-    v = verdicts(out, where, markers, items, 1)
-    assert v["lines"] == ["not proved"] and v["structural"] == []
+    v = verdicts(out, where, markers, items, 1, given={"f"})
+    assert v["lines"] == ["not given"] and v["structural"] == []
 
 
 CTX = "mellow ctx\na b k : ℤ\nhk : a = k + k\n_ctx0 : True\nm : ℤ\nhm :\n  b =\n    m + m\n⊢ True"
@@ -158,7 +173,7 @@ def test_counterexamples_are_their_own_theorems_and_need_a_faithful_context():
     ref = {1: {"entries": [(["k"], "ℤ"), (["hk"], "a = k + k")], "values": {"k": "1"}, "check": "norm_num"}}
     src, where, markers = assemble(STATEMENT, items, refutations=ref)
     lines = src.splitlines()
-    faith = where_of(src, "have _faith1")
+    faith = where_of(src, "have _faith :")
     assert lines[faith:faith + 3] == ["    have _ : ℤ := k", "    have _ : a = k + k := hk", "    trivial"]
     n = lines.index("theorem cex_1 : ∃ (k : ℤ), (a = k + k) ∧ ¬ (a + b = 2 * k) := by") + 1
     assert lines[n:n + 3] == ["  refine ⟨(1), ?_⟩", "  norm_num", "#print axioms cex_1"] and where[n][1] == "cex"
@@ -195,3 +210,57 @@ def test_only_our_own_message_counts_as_a_context_printout():
     # After the goal is closed, the next claim's first tactic fails with "no goals": a structural error, for a retry.
     v = verdicts(f"mellow 0\nx.lean:{ctx}:2: error: no goals to be proved\n", where, markers, ITEMS, 3)
     assert v["lines"][1] == "not proved" and "no goals" in v["structural"][0]
+
+
+def test_a_line_that_doesnt_follow_from_its_reason_gets_a_second_chance_and_maybe_values():
+    items = [Item(line=0, kind="have", text="Even a", name="h0", reasons=["hb"])]
+    ref = {0: {"entries": [(["a", "b"], "ℤ"), (["hb"], "Even b")], "values": {"a": "1", "b": "0"}, "check": "decide"}}
+    src, where, markers = assemble(STATEMENT, items, reason_refutations=ref)
+    assert "theorem rcex_0 : ∃ (a b : ℤ), (Even b) ∧ ¬ (Even a) := by" in src
+    r = where_of(src, "first | (omega")
+    failed = f"x.lean:{r}:6: error: unsolved goals\n⊢ Even a\nmellow 0\n"
+    v = verdicts(failed, where, markers, items, 1)
+    assert v["lines"] == ["wrong reason"] and v["failed_reasons"] == [0] and v["reason_refuted"] == []
+    v = verdicts(failed + "'rcex_0' depends on axioms: [propext]\n", where, markers, items, 1)
+    assert v["reason_refuted"] == [0]
+
+
+def test_citing_one_link_of_a_chain_cites_the_whole_line():
+    items = [Item(line=0, kind="have", text="c = b * m", name="h1"),
+             Item(line=0, kind="have", text="b * m = a * (k * m)", name="h2", reasons=["h1"]),
+             Item(line=1, kind="close", text="a ∣ c", name="h3", reasons=["h2"])]
+    src = assemble("(a b c k m : ℤ) : a ∣ c", items)[0]
+    assert "      clear * - h1\n" in src  # h2's own chain: only what's in scope before it
+    assert "      clear * - h1 h2\n" in src
+    # "P, so Q" on one line isn't a chain: a later "so" draws on Q alone.
+    items = [Item(line=0, kind="have", text="x ∉ A ∪ B", name="h1"),
+             Item(line=0, kind="have", text="x ∉ A ∨ x ∉ B", name="h2"),
+             Item(line=1, kind="have", text="x ∈ Aᶜ ∩ Bᶜ", name="h3", reasons=["h2"])]
+    assert "      clear * - h2\n" in assemble("{α : Type*} (A B : Set α) (x : α) : True", items)[0]
+
+
+def test_a_chain_continued_on_the_next_line_is_one_chain():
+    from app.leancheck import chain_links
+    items = [Item(line=0, kind="tactic", text="obtain ⟨k, hk⟩ := h"),
+             Item(line=1, kind="have", text="n ^ 2 = (2 * k + 1) ^ 2", name="h1"),
+             Item(line=1, kind="have", text="(2 * k + 1) ^ 2 = 4 * k ^ 2 + 4 * k + 1", name="h2"),
+             Item(line=2, kind="have", text="4 * k ^ 2 + 4 * k + 1 = 2 * (2 * k ^ 2 + 2 * k) + 1", name="h3"),
+             Item(line=3, kind="close", text="Odd (n ^ 2)", name="h4", reasons=["h3"])]
+    assert chain_links(items)["h3"] == ["h1", "h2", "h3"] and chain_links(items)["h4"] == ["h4"]
+    assert "clear * - h1 h2 h3" in assemble("(n : ℤ) (h : Odd n) : Odd (n ^ 2)", items)[0]
+
+
+def test_an_assumption_the_goal_doesnt_give_is_the_students_mistake():
+    from app.leancheck import intro_names
+    assert intro_names("intro x y (h : x = y)") == ["h", "x", "y"]
+    assert intro_names("obtain ⟨k, hk⟩ := ha") == []
+    items = [Item(line=0, kind="tactic", text="intro (h : Real.sqrt (a * b) ≤ (a + b) / 2)")]
+    src, where, markers = assemble("(a b : ℝ) : Real.sqrt (a * b) ≤ (a + b) / 2", items)
+    out = "x.lean:6:8: error: Tactic `introN` failed: There are no additional binders or `let` bindings in the goal\n"
+    v = verdicts(out, where, markers, items, 1, given={"a", "b"})
+    assert v["lines"] == ["not given"] and v["structural"] == []
+    # Re-introducing the statement's own variables is the translation's slip: sent back for a retry.
+    items = [Item(line=0, kind="tactic", text="intro a b")]
+    src, where, markers = assemble("(a b : ℝ) : a = a", items)
+    v = verdicts(out, where, markers, items, 1, given={"a", "b"})
+    assert v["lines"] == ["not proved"] and v["structural"]
