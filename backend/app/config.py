@@ -23,21 +23,26 @@ MATHPIX_APP_ID, MATHPIX_APP_KEY = env("MATHPIX_APP_ID"), env("MATHPIX_APP_KEY")
 MYSCRIPT_APP_KEY, MYSCRIPT_HMAC_KEY = env("MYSCRIPT_APP_KEY"), env("MYSCRIPT_HMAC_KEY")
 CONFIDENCE_MIN = float(env("CONFIDENCE_MIN", "0.8"))  # below this, the LLM fallback re-reads the line
 
-# Models (DECISIONS #15): DeepSeek for every LLM call for now. Any claude-* id works too.
+# Models. Reading: DeepSeek Flash by default (DECISIONS #15); any claude-* id works too.
 FALLBACK_READER_MODEL = env("FALLBACK_READER_MODEL", "deepseek-flash")  # must accept images
-REASONING_MODEL = env("REASONING_MODEL", "deepseek-v4-pro")
+# Lean (DECISIONS #25, #27): Claude, which proved 25/25 problems in L0 where DeepSeek V4 Pro proved 1 of 4.
+LEAN_MODEL = env("LEAN_MODEL", "claude-sonnet-5-5")  # statements, translations, single-claim proofs
+LEAN_WORDS_MODEL = env("LEAN_WORDS_MODEL", "claude-haiku-5-5")  # reads a statement back in words, independently
 DEEPSEEK_API_KEY = env("DEEPSEEK_API_KEY")  # native API (DECISIONS #13)
 DEEPSEEK_BASE_URL = env("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
-LLM_TIMEOUT_S = float(env("LLM_TIMEOUT_S", "20"))
+# Longest wait between streamed chunks: Claude at high effort can think silently for over 20 s.
+LLM_TIMEOUT_S = float(env("LLM_TIMEOUT_S", "120"))
 VENDOR_TIMEOUT_S = float(env("VENDOR_TIMEOUT_S", "10"))
+
+# When set, every route but /health needs it in X-Mellow-Key, so a leaked server URL can't spend the LLM budget.
+ACCESS_CODE = env("ACCESS_CODE")
 
 # Daily caps per user, by cost class (SPEC §7).
 CAPS = {
     "stroke": int(env("CAP_STROKE", "3000")),
     "read_llm": int(env("CAP_READ_LLM", "200")),
-    "reason": int(env("CAP_REASON", "50")),
-    "structure": int(env("CAP_STRUCTURE", "500")),  # page labelling (DECISIONS #21), cheap model
-    "presolve": int(env("CAP_PRESOLVE", "30")),  # background solves of problems found on the page (DECISIONS #22)
+    "reason": int(env("CAP_REASON", "50")),  # the leaneval experiments' class
+    "lean": int(env("CAP_LEAN", "300")),  # model calls for Lean: a statement is 2, a check 1-10
 }
 
 

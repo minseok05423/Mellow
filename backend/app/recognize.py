@@ -16,7 +16,6 @@ import time
 import httpx2 as httpx
 from pydantic import BaseModel, Field
 
-from .verify import looks_like_words
 from . import config, llm, store
 
 
@@ -25,13 +24,18 @@ class Stroke(BaseModel):
     pts: list[list[float]]  # [x, y, pressure, ms since stroke start]
 
 
+def looks_like_words(latex: str) -> bool:
+    """MyScript's math mode reads handwritten words as runs of single-letter variables ("l e t f").
+    shortcut: any run of 3+ plain letters counts as words, so a product like `abc` is re-read by the LLM.
+    Upgrade path: MyScript "Raw Content" mode, which separates text from math."""
+    bare = re.sub(r"\\[a-zA-Z]+|[\s{}]", "", latex)
+    return bool(re.search(r"[a-zA-Z]{3,}", bare))
+
+
 class RecognizeRequest(BaseModel):
     strokes: list[Stroke] = Field(default_factory=list, max_length=400)  # none for an image on the page
     image: str | None = None  # PNG data URL of the line (or of a pasted image), for the LLM reader
     context: list[str] = Field(default_factory=list, max_length=8)  # confirmed lines above, oldest first
-    # The student's choices (Models menu). None = server default. Checked against the catalog by the route.
-    recognizer: str | None = None
-    reader_model: str | None = None
 
 
 class Reading(BaseModel):
@@ -173,8 +177,7 @@ def read_with_llm(req: RecognizeRequest, user: str, guess: Reading | None, model
 # ---------- the hybrid ----------
 
 def recognize(req: RecognizeRequest, user: str) -> Reading:
-    rec = req.recognizer or config.RECOGNIZER
-    reader = req.reader_model or config.FALLBACK_READER_MODEL
+    rec, reader = config.RECOGNIZER, config.FALLBACK_READER_MODEL
     guess = None
     if req.strokes and recognizer_configured(rec):  # a pasted image has no strokes: straight to the image reader
         key = llm.cache_key("strokes", [s.pts for s in req.strokes], rec)

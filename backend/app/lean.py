@@ -1,4 +1,4 @@
-"""Check Lean proofs against Mathlib for the L0 experiment (leaneval/run.py).
+"""Run Lean 4 + Mathlib on model-written text, safely (used by leancheck.py and the leaneval experiments).
 
 Lean runs inside bwrap: no network, no environment, and only the system libraries, the Lean toolchain, this Mathlib
 project (read-only) and a scratch folder are visible, so model-written code (Lean can run code while elaborating)
@@ -6,8 +6,8 @@ can't reach keys, the backend or the internet. The text filter below only stops 
 The checker builds the file itself: `import Mathlib`, the model's helper lemmas, then `theorem target <statement> := by
 <proof>` with the statement we chose, so a model can't change what gets proved. Text that runs code or cheats is rejected
 before Lean sees it, and `#print axioms` confirms only Lean's three standard axioms were used.
-shortcut: one `lake env lean` process per check, which reloads Mathlib every time. Upgrade to the Lean REPL (Mathlib
-loaded once) if checks are too slow for the app.
+shortcut: one `lake env lean` process per check, which reloads Mathlib every time (~5 s). Upgrade path: a warm Lean
+REPL (Kimina or leanprover-community/repl) keeps Mathlib loaded, about a second per check.
 """
 from __future__ import annotations
 
@@ -17,7 +17,12 @@ import tempfile
 import time
 from pathlib import Path
 
-LEAN_DIR = Path(__file__).resolve().parents[2] / "lean"
+from . import config
+
+# shortcut: on Codespaces /workspaces is a loop-mounted image and Mathlib thrashes it (>300 s per check vs ~5 s), so
+# point MELLOW_LEAN_DIR at a copy on the local disk (`cp -a lean /tmp/mellow-lean`; /tmp is wiped when the Codespace
+# stops). On a real server, keep Mathlib on local disk and drop this.
+LEAN_DIR = Path(config.env("MELLOW_LEAN_DIR") or Path(__file__).resolve().parents[2] / "lean")
 TIMEOUT_S = 300
 STANDARD_AXIOMS = {"propext", "Classical.choice", "Quot.sound"}
 # Model text must not run code, add axioms, skip proofs or redefine syntax. (`?` tactics search and print; banned so a
@@ -37,10 +42,10 @@ def _run(src: str) -> tuple[str, float]:
     with tempfile.TemporaryDirectory() as work:
         f = Path(work) / "check.lean"
         f.write_text(src)
-        cmd = ["bwrap", "--ro-bind", "/usr", "/usr", "--symlink", "usr/lib", "/lib", "--symlink", "usr/lib64", "/lib64",
-               "--symlink", "usr/bin", "/bin", "--ro-bind", str(TOOLCHAIN), str(TOOLCHAIN),
-               "--ro-bind", str(LEAN_DIR), str(LEAN_DIR), "--proc", "/proc", "--dev", "/dev",
-               "--tmpfs", "/tmp", "--bind", work, work,  # /tmp first: the scratch folder lives under it
+        # An empty /tmp first: the scratch folder and possibly LEAN_DIR live under it and are bound on top.
+        cmd = ["bwrap", "--tmpfs", "/tmp", "--ro-bind", "/usr", "/usr", "--symlink", "usr/lib", "/lib",
+               "--symlink", "usr/lib64", "/lib64", "--symlink", "usr/bin", "/bin", "--ro-bind", str(TOOLCHAIN), str(TOOLCHAIN),
+               "--ro-bind", str(LEAN_DIR), str(LEAN_DIR), "--proc", "/proc", "--dev", "/dev", "--bind", work, work,
                "--unshare-all", "--die-with-parent", "--new-session", "--clearenv",
                "--setenv", "PATH", f"{bin_}:/usr/bin", "--setenv", "HOME", work, "--chdir", str(LEAN_DIR),
                str(bin_ / "lake"), "env", str(bin_ / "lean"), str(f)]
@@ -55,7 +60,8 @@ def _run(src: str) -> tuple[str, float]:
 def _errors(out: str, offset: int) -> list[str]:
     """Lean's error messages, with line numbers counted from the start of the model's text."""
     errs = []
-    for m in re.finditer(r"^\S*?:(\d+):(\d+): error: (.*?)(?=^\S*?:\d+:\d+: |\Z)", out, re.M | re.S):
+    # Newer Lean tags some errors ("error(lean.unknownIdentifier): ..."); a trace line from L0b ends a message.
+    for m in re.finditer(r"^\S*?:(\d+):(\d+): error(?:\([^)]*\))?: (.*?)(?=^\S*?:\d+:\d+: |^mellow \d+$|\Z)", out, re.M | re.S):
         errs.append(f"line {int(m.group(1)) - offset}, col {m.group(2)}: {m.group(3).strip()}")
     if not errs and "error" in out.lower():
         errs.append(out.strip()[:1500])
@@ -86,3 +92,8 @@ def check_statement(statement: str) -> dict:
     out, secs = _run(f"import Mathlib\n\ntheorem target {statement} := by\n  sorry\n")
     errors = _errors(out, offset=0)
     return {"ok": not errors, "errors": errors, "seconds": round(secs, 1)}
+
+
+def ready() -> bool:
+    """Is Mathlib built where the checker looks? (On Codespaces, /tmp/mellow-lean is gone after a restart.)"""
+    return (LEAN_DIR / ".lake" / "packages" / "mathlib" / ".lake" / "build").is_dir() and TOOLCHAIN.is_dir()

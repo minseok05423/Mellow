@@ -1,34 +1,36 @@
 # Mellow: everything in one place
 
-This file is a single overview of the project as of 2026-10-19: what Mellow is, what has been
+This file is a single overview of the project as of 2026-10-20: what Mellow is, what has been
 built, how it works, how to run and test it, what's next, and the strategy discussions so far
-(§10). The detailed sources stay where
-they are: product spec in [SPEC.md](SPEC.md), design decisions in [DECISIONS.md](DECISIONS.md),
-working rules in [CLAUDE.md](CLAUDE.md), run instructions in [README.md](README.md).
+(§10). The detailed sources stay where they are: product spec in [SPEC.md](SPEC.md), design
+decisions in [DECISIONS.md](DECISIONS.md), working rules in [CLAUDE.md](CLAUDE.md), run
+instructions in [README.md](README.md).
 
 ---
 
 ## 1. What Mellow is
 
-A GoodNotes-style handwriting notebook for university students doing intro proofs (first-year
-proofs and analysis). It runs in the browser as a web app / PWA, with iPad + Apple Pencil as the
-reference device.
+**A lightweight Lean prover that lives on the tablet** (DECISIONS #25, #27). A GoodNotes-style
+handwriting notebook for university students doing intro proofs, in the browser as a web app /
+PWA, with iPad + Apple Pencil as the reference device.
 
-Students write their own work on blank, lined or grid pages. When they **select** part of it,
-they pick **Check**, **Hint**, **Answer** or **Explain with AI**, and the reply appears on the
-page next to their work:
+Students write a problem and its proof by hand. They lasso it and press **Check with Lean**:
+they confirm what was read, confirm what Lean will prove (shown in plain words), and Lean 4 +
+Mathlib checks the proof **line by line**. A card on the page says, for each line:
 
-- **Algebra** is checked by SymPy, which gives a proven verdict: "Follows" or a counterexample.
-- **Proof steps in words** go to an LLM, the reasoning model, labelled as the AI's.
-- **Hint, Answer and Explain** on a problem build on one proof the model writes once, with its
-  algebra checked by SymPy, kept on the server.
+- **✓ Lean checked this step.**
+- **✓ True, but it needs a step you didn't write** (Lean checked a proof the model filled in).
+- **✗ True, but it doesn't follow from the reason you gave.**
+- **? Lean couldn't verify this line**: it may be wrong, or need more steps.
+- **– Not checked**: Lean stopped before this line.
 
-Later phases add animated explanations, interactive widgets, accounts and sync, PDFs, and
-handwriting search.
+The tablet is a thin client; reading, LLM calls and Lean run on the server. On 2026-10-20 the
+notebook was stripped to this one feature (DECISIONS #27): the earlier SymPy checks, hints,
+answers, animated explanations and widgets are in git history.
 
 **Core principle:** the student does the generative work; the board responds to *their*
-reasoning. The assistant never acts on its own, and never judges a reading the student hasn't
-confirmed.
+reasoning. The assistant never acts on its own, and never judges a reading, or a Lean statement,
+the student hasn't confirmed.
 
 ### Non-negotiables
 
@@ -37,9 +39,10 @@ These are kept even in "minimal" mode:
 - validation + retry of every LLM output
 - caching
 - logging
-- SymPy verification for algebra
+- machine verification: Lean gives every verdict; an LLM alone never judges a step
 - API keys server-side only (LLM and handwriting vendors alike; the browser never calls a vendor)
-- confirm-before-judge: no verdict on a reading the student hasn't confirmed
+- confirm-before-judge: no verdict on a reading or statement the student hasn't confirmed
+- model-written Lean runs only in the sandbox
 
 ---
 
@@ -85,100 +88,46 @@ These are kept even in "minimal" mode:
     numbers, triangle angles and AM-GM all passed on the first real try).
 11. **Pasted images** are read by the image reader and work like handwriting.
 12. **Lean experiment (L0) started:** Lean 4 + Mathlib installed, a sandboxed checker and a
-    25-problem evaluation written. Not run yet: this machine is too small (see §9).
+    25-problem evaluation written.
+13. **Lean becomes the core** (2026-10-20, DECISIONS #25). Lean checks were found to thrash
+    `/workspaces` (a loop-mounted disk image): over 300 s per check even on 16 GB. With Mathlib
+    copied to the local disk at `/tmp` a check takes ~5 s (DECISIONS #26).
+14. **L0 and L0b run** (2026-10-20, §9): Claude Sonnet proves 25/25 problems; line-by-line
+    checking catches 11/11 planted mistakes with no false ✓ (DECISIONS #28).
+15. **The notebook is stripped to Check with Lean** (2026-10-20, DECISIONS #27), tested in the
+    browser with faked endpoints and end to end with the real backend, Lean and Claude.
+16. **Ready to put online for testers** (2026-10-20, DECISIONS #29). The MVP builds and every
+    test passes, end to end too. No native iPad app: testers open an invite link in Safari and add
+    it to the home screen. `deploy/` launches one EC2 t3.xlarge with HTTPS and an access code in
+    the link; it waits on AWS credentials and a tldraw key.
 
 ---
 
 ## 3. What works today
 
-### Notebook (P1), at `http://localhost:5173/`
+### Notebook, at `http://localhost:5173/`
 - **Notebook library:** create, rename, delete.
 - **Pages:** A4 pages stacked vertically; blank, lined or grid paper; "+ Page" adds one at the end.
-- **Tools:**
-  - pen, highlighter, eraser
-  - lasso: selects strokes that are at least 75% inside the loop
-  - shapes, text, images
-  - undo/redo, zoom
+- **Tools:** pen, eraser, lasso (selects strokes at least 75% inside the loop), select, hand;
+  undo/redo, zoom.
 - **Autosave** in the browser (IndexedDB, one store per notebook).
 - **Raw ink:** every pen stroke also stores its full-rate points with timestamps
-  (`[dx, dy, pressure, dt]`) in the shape's `meta.ink`. It's captured from pointer events, and
-  tldraw alone would drop the timing that recognizers need.
-- **Pasted images** (a screenshot of a problem sheet, a photo of written work) are read by the
-  image reader at 2× and count as one line: their reading wraps under them, and selecting one
-  gives Check / Hint / Answer / Explain like handwriting.
-- **Bake-off samples:** lasso a line → *Save sample* → type the expected LaTeX. *Samples (n) ⤓*
-  downloads them as JSON for the recognizer test.
-
-### Read + Check (P2)
-- **Line grouping:** strokes are grouped into lines by vertical overlap. Stacked pieces, like a
-  fraction, are merged into one line.
+  (`[dx, dy, pressure, dt]`) in the shape's `meta.ink`, for the handwriting recognizer.
 - **Live reading:** about 1 s after you stop writing, each new line is read and shown faintly
-  under it. Readings can be toggled with *Readings on/off*.
-- **Four actions:** lasso one or more lines, then press **Check ✓**, **Hint**, **Answer** or
-  **Explain with AI** (P3a).
-  - The **confirm box** lists every selected line's reading for you to confirm or fix (✎ opens a
-    LaTeX field with a live preview), plus **what the selection is** (proof steps, a problem or
-    a concept) and, for steps, **the problem they work on**. Both come from the page's labels
-    and can be changed. Check also shows the line above.
-  - Only confirmed readings are ever judged.
-- **Page labels:** after you pause writing, a cheap model labels every line on the page
-  (problem, definition, claim, proof step, algebra, concept, note) and groups lines into
-  described segments. They're kept with the notebook until the page's readings change. Any
-  problem found starts solving in the background, so Hint/Answer/Explain on it are usually
-  instant. A step on a new page finds its problem on the page before.
-- **Check gives one card.**
-  - On a problem or a concept: "nothing to check", with no request.
-  - If the selection contains words, all its lines are treated as one block, and the reasoning
-    model says holds / gap / error ("Check · AI, not verified"). It never gives the fix.
-  - If it's all algebra, each line is checked by SymPy as a step. The results are combined:
-    the most serious verdict, with each line's problem listed ("Line 2: …").
-- **Card types:**
-  - ✓ **Follows**: SymPy proved the step follows from the line above.
-  - ✗ **Counterexample**: SymPy found values where the step fails, e.g. "Try a = 1, b = 1: the
-    line above gives 4, but yours gives 2."
-  - ? **Question**: algebra SymPy can't settle (template question).
-  - ◇ **Check · AI, not verified**: the model's holds / gap / error on steps in words.
-  - ? **Hint**: one question toward the next step.
-  - ✦ **Answer · AI**: the proof (steps whose algebra SymPy checked are marked ✓), whether the
-    selected steps hold and how to fix them, or a definition.
-  - ❋ **Explanation · AI**: on a problem, an **animated board** that plays the checked proof one
-    click at a time: equations draw in, rewrite themselves in place (shared symbols slide to their
-    new spots), and the conclusion lights up; captions say what each step does, why, and whether
-    SymPy checked it. Replay starts over; Copy gives the text. On steps or a concept, a text card.
-  - **Explain as a picture** (choose it in the confirm box, on a problem or concept): the AI draws a
-    geometric, intuitive argument (areas cut and rearranged, a semicircle, a parallel line, a graph);
-    shapes draw themselves on, pieces turn and slide into place, angles light up. SymPy checks every
-    length, angle, area and equation the picture claims ("✓ checked by SymPy" for all values, "✓ true
-    in this picture" for the drawn values), and moved pieces can't stretch. Takes 2-3 minutes.
-  - • **Noted**: nothing to check, no reasoning model available, or no checked proof.
-- **Cards** are ordinary page objects. Code places them in free space next to the selection
-  (the LLM never picks positions). You can move or delete them, and they're saved with the
-  notebook.
-- **Solve once (Hint / Answer / Explain on a problem):** the model writes the proof as steps,
-  each algebra claim tagged identity or derived and checked by SymPy; a counterexample goes back
-  to the model for one retry. The checked proof is cached on the server, keyed by the problem, so
-  only the first solve is slow (20–70 s with DeepSeek V4 Pro at high effort), and it usually
-  runs in the background before any button is pressed. Hints use it as a
-  hidden reference and follow the student's own route; it reaches the browser only through
-  Answer or Explain. If no proof passes, Hint asks without one, and Answer/Explain say so.
-- **Copy and paste:**
-  - each card has a **Copy** button (text, with math as LaTeX)
-  - card text can be highlighted with the mouse and copied with Ctrl/Cmd+C; math pastes as LaTeX
-  - readings under lines can be highlighted with the select tool
-  - text in the confirm box can be selected
-  - copying a whole card (selected as a shape) gives its text
+  under it (*Readings on/off*). Pasted images are read too and count as one line.
 
-### Models menu
-The student picks:
-- the **handwriting reader**: MyScript, Mathpix, or none
-- the **image reader**: vision models only
-- the **reasoning model**
-
-Prices are shown. Options whose keys aren't configured are disabled. The backend publishes the
-catalog at `GET /api/models` and rejects any other choice. Choices are saved per browser.
-
-### M1 ε–δ demo, at `http://localhost:5173/epsdelta.html`
-Drag ε and watch δ respond. It becomes the first board widget in P3.
+### Check with Lean
+1. Lasso the problem and its proof → **Check with Lean**.
+2. **Confirm box:** each line's reading, to confirm or fix (✎ opens a LaTeX field with a live
+   preview), and whether it's *the problem* or *a proof line* (with several lines, the first starts
+   as the problem). If no selected line is the problem, type it.
+3. **"Lean will check that your proof shows: …"** The problem as a Lean statement, read back in
+   plain words by a second model that sees only the Lean. *Yes, check my proof* or *Not what I
+   meant*.
+4. **The card**, next to the proof: one row per line with its verdict (§1), and a summary
+   ("Lean checked every line, and the proof is complete." / "Look again at line 3.").
+- Typical times: stating a problem ~10–20 s, a check 5–60 s (a seconds counter shows).
+- Old notebooks still open; old cards and animated boards show as plain cards.
 
 ---
 
@@ -187,85 +136,59 @@ Drag ε and watch δ respond. It becomes the first board widget in P3.
 ### Reading handwriting (`POST /recognize`)
 1. The browser sends a line's strokes (with timing), a PNG of the line, and the confirmed lines
    above it as context.
-2. The **stroke recognizer** reads it first. The default is MyScript's REST API
-   (`/api/v4.0/iink/recognize`, HMAC-signed, solver turned off so it never hands out answers).
-   Mathpix Strokes is the alternative.
-3. The **LLM fallback** reads the line image instead (default DeepSeek Flash) when:
-   - there's no reading,
-   - confidence is low (< 0.8),
-   - the line has prose, or
-   - the reading looks like words spelled as single letters ("l e t f"). MyScript's math mode
-     does that with words. Any run of 3+ letters counts as words.
+2. The **stroke recognizer** reads it first: MyScript's REST API (HMAC-signed, solver turned
+   off), or Mathpix Strokes.
+3. The **LLM fallback** (default DeepSeek Flash) reads the line image when there's no reading,
+   confidence is below 0.8, the line has prose, or the reading looks like words spelled as single
+   letters.
+4. Results are cached by strokes + reader.
 
-   The fallback is told to transcribe exactly, mistakes included, and to write prose as
-   `\text{…}`.
-4. Results are cached by strokes + reader. Older letter-by-letter readings are re-read once when
-   the notebook opens.
+### Stating the problem (`POST /lean/statement`)
+- Claude Sonnet writes the Lean statement; Lean must accept it (checked with `sorry` as the
+  proof), else the error goes back for one retry.
+- Claude Haiku, given only the Lean, says what it asserts in words, for the student to confirm.
 
-### Checking (`POST /check`)
-**Request:** the confirmed line, the confirmed lines above, the confirmed problem (if known),
-`confirmed: true` (required), and the reasoning model.
+### Checking the proof (`POST /lean/check`, `backend/app/leancheck.py`)
+1. **Translate:** Claude Sonnet turns each confirmed line into Lean: structural tactics (intro,
+   obtain, induction, use, …), the claims the line makes, and the hypotheses it cites as reasons.
+   It writes no proofs; tactic lines that could prove something are rejected.
+2. **Check:** one Lean file; every claim must be proved by fixed automation (omega, ring_nf,
+   linarith, nlinarith, positivity, norm_num, simp_all, aesop) from the lines before it. A failed
+   step is reported and Lean carries on; a marker after each item shows Lean reached it.
+3. **Retry the translation** if Lean rejects its structure (never told which claims failed).
+4. **Single-claim proofs:** a claim the automation can't prove gets a proof from the model, which
+   Lean checks → "skipped step". Not after "suppose, for contradiction" (DECISIONS #28).
+5. **Reasons:** a line that cites a reason must also follow with the other hypotheses cleared.
+6. The result is cached by statement + lines, logged, and returned per line.
 
-**A line counts as words** if it contains words other than joining words (so, thus, hence,
-then, therefore, and, i.e., which, gives, implies), or a run of 3+ letters.
-- Words go to the reasoning model (`structured_call`, below) at high thinking effort, which
-  returns holds / gap / error with a reason.
-- Hints (`/assist`) run at medium effort; a hint containing "correct", "wrong" or "well done"
-  fails validation and is retried once.
-- Word lines are never used as the line an algebra step is checked against.
-
-**Algebra goes to SymPy:**
-- LaTeX is parsed with `parse_latex`.
-- **Equal or not:** two expressions are compared directly. If they differ, a counterexample
-  search finds values where they disagree.
-- **Equations:** the new equation must follow from the earlier one, checked by solving.
-- **Special cases:**
-  - Continuation lines ("= …") continue the previous expression.
-  - Substitutions like "p = 2k" in the lines above are applied first.
-  - An equation and a plain expression can't be compared, so the answer is a question,
-    never a guess.
-- Every check runs in a separate process with a 3 s timeout. The processes start from a
-  preloaded server ("forkserver"), so one slow check can't hang the server.
-
-**Every check is logged** (the start of the learning log).
+### Lean
+- `backend/app/lean.py` runs `lake env lean` on a generated file inside **bwrap**: no network, no
+  environment, read-only Mathlib, a scratch folder. A text filter rejects `sorry`, axioms and
+  code execution; `#print axioms` confirms only the standard axioms.
+- Lean 4 + Mathlib live in `lean/`; on Codespaces a copy in `/tmp/mellow-lean`
+  (`MELLOW_LEAN_DIR`), because `/workspaces` thrashes (DECISIONS #26).
 
 ### The LLM layer (`backend/app/llm.py`)
-Every LLM call goes through `structured_call`, in this order:
-1. Check the cache.
-2. Check the daily quota (per user: 3000 stroke readings, 200 LLM readings, 50 reasoning calls,
-   500 page labellings, 30 background solves).
-3. Call the model, streaming.
-4. Validate the output against its Pydantic schema, plus semantic checks.
-5. If invalid, retry once, showing the model its error.
-6. If it's still invalid, return a clean error.
+Every LLM call goes through `structured_call`: cache → daily quota (per user: 3000 stroke
+readings, 200 LLM readings, 300 Lean model calls) → streaming call → Pydantic + semantic
+validation → one retry with the error → clean error. Every attempt is logged to SQLite; invalid
+output is never returned or cached; prompts are part of the cache key.
 
-Every attempt is logged to SQLite. Invalid output is never returned or cached. Prompts are part
-of the cache key, so editing a prompt never serves old answers.
+### Models
+| Job | Default |
+|---|---|
+| Handwriting (strokes) | MyScript |
+| Image reader (fallback) | `deepseek-flash` |
+| Lean: statements, translation, single-claim proofs | `claude-sonnet-5-5` |
+| Lean statement read back in words | `claude-haiku-5-5` |
 
-**Providers:**
-- **DeepSeek** (native API, OpenAI format): JSON mode with the schema in the prompt; thinking
-  depth mapped from the effort level; images only for `deepseek-flash`.
-- **Claude** (Anthropic SDK): structured outputs; server-side fallback for Opus/Sonnet 5.5.
-
-Models are routed by name: `deepseek-*` goes to DeepSeek, everything else to Claude.
-
-### Default models
-
-| Job | Default | Alternatives in the catalog |
-|---|---|---|
-| Handwriting (strokes) | MyScript (in your `.env`) | Mathpix, none |
-| Image reader (fallback) | `deepseek-flash` | Claude Haiku/Sonnet/Opus 5.5 |
-| Reasoning | `deepseek-v4-pro` | Claude Haiku/Sonnet/Opus 5.5 |
-
-Privacy note: DeepSeek's native API runs on servers in China. Check the target university's
-policy before real students use it.
+Set in `backend/.env`. DeepSeek's native API runs on servers in China: check the target
+university's policy before real students use it.
 
 ### Where things are stored
-- **Notebooks:** in the browser (tldraw + IndexedDB).
-- **Readings:** in the notebook's document `meta`, written outside undo history.
-- **Feedback cards:** shapes in the notebook.
-- **Backend:** one SQLite file (`backend/mellow.sqlite3`) with the request log, cache and quota
-  usage.
+- **Notebooks:** in the browser (tldraw + IndexedDB). Readings in the document's `meta`; cards
+  are shapes.
+- **Backend:** one SQLite file (`backend/mellow.sqlite3`) with the request log, cache and quotas.
 - **User identity:** an anonymous per-browser id, until accounts in P4.
 
 ---
@@ -274,215 +197,140 @@ policy before real students use it.
 
 ```
 CLAUDE.md          working rules + non-negotiables
-SPEC.md            product spec v2 (vision, features, assistant, storage, LLM rules, P1–P6)
-DECISIONS.md       18 design decisions, one paragraph each
+SPEC.md            product spec
+DECISIONS.md       28 design decisions, one paragraph each
 README.md          how to run
 PROJECT.md         this file
-.claude/skills/    scene-json (scene format + validator), math-verify (SymPy step checker)
 
-frontend/          Vite 8 + React 19 + TypeScript + tldraw 5.5 + KaTeX
-  index.html                  the notebook app
-  epsdelta.html               M1 ε–δ demo (anim.ts, plot.ts, epsdelta.ts)
+frontend/          Vite + React + TypeScript + tldraw + KaTeX
   src/notebook/
     main.tsx        hash router: library ↔ notebook
     Library.tsx     notebook list; library.ts stores the index
-    Notebook.tsx    tldraw setup, toolbar, top bar (pages, paper, readings, Models, samples)
+    Notebook.tsx    tldraw setup, toolbar, top bar (pages, paper, readings)
     pages.tsx       A4 page shape, paper styles, page stack, camera limits
     ink.ts          raw stroke recorder (meta.ink)
     lasso.ts        lasso tool (75%-inside rule)
     lines.ts        groups strokes into lines
-    readings.ts     live reading, readings store, re-read of letter-by-letter readings
-    CheckUI.tsx     readings under lines, the four action buttons, confirm box, combining results
-    structure.ts    page labels (roles + segments), background solving, finding an action's context
-    scene.tsx       the animated explanation board: plays scene JSON with Manim-style motion
-    feedback.tsx    feedback card shape, placement, Copy button
-    models.ts       model catalog/choices
-    samples.ts      bake-off sample recording/download
+    readings.ts     live reading, readings store
+    CheckUI.tsx     readings under lines, Check with Lean, the confirm box
+    feedback.tsx    the card shape, placement, Copy button
     api.ts          calls to the backend (/api proxy)
-  tests/            Playwright end-to-end tests (Python): test_notebook, test_check, test_models, test_epsdelta
+  tests/            Playwright (Python): test_notebook, test_lean
 
-backend/           FastAPI + Pydantic + SymPy + SQLite
+backend/           FastAPI + Pydantic + SQLite
   app/
-    main.py         routes: /health, /models, /recognize, /structure, /check, /assist (+ /scene stub → 501)
-    config.py       settings from .env, daily caps, which models are configured
-    llm.py          structured_call, DeepSeek + Claude providers, streaming
+    main.py         /health, /recognize, /lean/statement, /lean/check
+    leancheck.py    stating a problem, checking a proof line by line
+    lean.py         running Lean sandboxed
     recognize.py    MyScript, Mathpix, LLM fallback, the hybrid
-    verify.py       SymPy checking (process + timeout), word detection
-    check.py        /check: SymPy for algebra, the AI's holds / gap / error for words, templates
-    assist.py       /assist: solve + SymPy-verify once, then hint / answer / explain
-    structure.py    /structure: page labels from a cheap model
-    scene.py        a checked proof -> scene JSON for the board
-    geometry.py     pictures: the model's figure checked by SymPy, compiled to scene JSON v2
-    catalog.py      model catalog with prices
-    store.py        SQLite: request log, cache, quotas
-  bakeoff/run.py    recognizer bake-off over recorded samples
-  leaneval/         Lean L0 experiment: problems.json (25 problems + reference Lean statements),
-                    lean.py (sandboxed checker), run.py (prove + formalize evaluation)
-  tests/            pytest suite (98 tests)
+    llm.py          structured_call, DeepSeek + Claude providers, streaming
+    config.py, store.py
+  leaneval/         L0 (run.py: prove + state 25 problems), L0b (steps.py + steps.json: planted mistakes)
+  bakeoff/          handwriting recognizer comparison
+  tests/            pytest
 
-lean/              Lean 4 + Mathlib project used by leaneval (its .lake build cache is git-ignored)
+lean/              Lean 4 + Mathlib project (its .lake build cache is git-ignored)
 ```
 
 ---
 
 ## 6. Running it
 
-**Frontend** (only port 5173 needs forwarding):
-```bash
-cd frontend && npm install && npm run dev
-```
-
-**Backend** (Vite proxies `/api` to it):
-```bash
-cd backend && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/uvicorn app.main:app --reload --port 8000
-```
-
-**Keys** go in `backend/.env` (git-ignored, never in `.env.example`):
-- `DEEPSEEK_API_KEY`
-- `MYSCRIPT_APP_KEY` / `MYSCRIPT_HMAC_KEY`
-- optionally `MATHPIX_APP_ID` / `MATHPIX_APP_KEY` and `ANTHROPIC_API_KEY`
-
-With no keys, everything still runs: readings are empty and you type them in the confirm box,
-and word lines get "Noted".
-
-**Opening it:**
-- `http://localhost:5173` from VS Code on your machine, or the forwarded Codespaces URL.
-- tldraw treats any HTTPS address that isn't localhost as production. The forwarded URL and an
-  iPad therefore need `VITE_TLDRAW_LICENSE_KEY` in `frontend/.env.local`.
+See [README.md](README.md). In short: `npm run dev` in `frontend/`; `uvicorn app.main:app
+--port 8000` in `backend/`; keys (`ANTHROPIC_API_KEY`, reader keys) and `MELLOW_LEAN_DIR` in
+`backend/.env`; on Codespaces `cp -a lean /tmp/mellow-lean` after every restart.
 
 **Tests:**
 ```bash
-cd backend && .venv/bin/python -m pytest -q                       # 98 pass, never call real APIs
-python3 -m venv ~/.venvs/mellow-tests                             # one-time Playwright setup
-~/.venvs/mellow-tests/bin/pip install -r frontend/tests/requirements.txt
-~/.venvs/mellow-tests/bin/playwright install chromium
-~/.venvs/mellow-tests/bin/python frontend/tests/test_check.py /tmp/shots   # with both servers up
-```
-All four end-to-end suites pass:
-- **test_notebook:** P1 features
-- **test_check:**
-  - readings and the confirm box
-  - SymPy cards
-  - multi-line statements and one card per Check
-  - letter-by-letter words
-  - copy and paste
-  - the four actions, page labels, problem lookup, Check on a problem
-- **test_models:** the Models menu
-- **test_epsdelta:** the M1 demo
-
-**Recognizer bake-off:** record samples in the notebook, download them, then run:
-```bash
-cd backend && .venv/bin/python -m bakeoff.run ~/Downloads/mellow-samples-*.json
+cd backend && .venv/bin/python -m pytest -q                                   # never calls real APIs or Lean
+~/.venvs/mellow-tests/bin/python frontend/tests/test_notebook.py /tmp/shots    # with both servers up
+~/.venvs/mellow-tests/bin/python frontend/tests/test_lean.py /tmp/shots        # Lean endpoints faked
+~/.venvs/mellow-tests/bin/python frontend/tests/test_lean.py /tmp/shots --real # real Lean + Claude
+cd backend && LLM_TIMEOUT_S=120 MELLOW_LEAN_DIR=/tmp/mellow-lean .venv/bin/python -m leaneval.steps  # L0b
 ```
 
 ---
 
-## 7. Design decisions (summary of DECISIONS.md)
+## 7. Design decisions
 
-1. **Web instead of native iOS:** no Mac on hand; tldraw works well in Safari.
-2. **ε–δ step function has f(0) = ½:** shows the "no δ fits" case clearly.
-3. **Show the largest working δ.**
-4. **One forwarded port:** Vite proxies `/api` to the backend.
-5. **Magnifier inset** instead of zooming the main ε–δ view.
-6. **Freeform handwriting notebook,** not a cell document.
-7. **Built on the tldraw SDK.**
-8. **Hybrid reading:** stroke recognizer first, LLM fallback when needed.
-9. **Accounts and server storage** (reverses spec v1).
-10. **Raw ink lives in each stroke's `meta`,** so it shares the stroke's undo step.
-11. **Lasso** selects strokes mostly (75%) inside the loop.
-12. **Models are chosen by tests on our own data,** with defaults meanwhile.
-13. **DeepSeek on its native API;** all LLM calls stream.
-14. **SymPy checks** run in separate processes with a hard timeout.
-15. **DeepSeek for every LLM call,** for now.
-16. **Students choose their models** from a catalog the server controls.
-17. **Proof steps in words:** they get a question from the reasoning model, and are never used
-    as the line algebra is checked against. Lassoed lines give one card. Words read as single
-    letters count as words.
-18. **Hints or Answers:** a toolbar switch. Replaced by #19.
-19. **Four selection actions** (Check, Hint, Answer, Explain with AI) replace the switch.
-20. **A problem is solved once,** its algebra checked by SymPy (identities on their own, derived
-    claims against earlier ones), and reused by Hint, Answer and Explain. Lean left out for now.
-21. **Lines get roles and segments;** context is found by structure, not RAG (RAG waits for P5).
-22. **Problems are solved in the background** once the page labels find them (own cap: 30/day).
-23. **Animated explanations are built by code** from the checked proof (no extra LLM call).
-24. **Pictures:** the model draws a proof, SymPy checks every claim and move, code lays it out.
+The full list is [DECISIONS.md](DECISIONS.md). The ones that shape the current app:
+- **#6–#11** the notebook: freeform handwriting, tldraw, hybrid reading, raw ink, the lasso.
+- **#13, #15** DeepSeek's native API, streaming (used for reading).
+- **#25** Mellow is a lightweight Lean prover on the tablet.
+- **#26** Mathlib lives on a local disk.
+- **#27** the notebook is stripped to Check with Lean.
+- **#28** how a line is judged.
 
 ---
 
 ## 8. Known shortcuts and limits
 
-These are marked `shortcut:` in the code.
+Where these live in code, they are marked `shortcut:`.
 
-**Reading and checking:**
-- **Line grouping** uses geometry only. Tall fractions or tightly packed lines can be split or
-  merged wrongly. Upgrade path: use stroke timing.
-- **Words rule:** any 3+ letter run counts as words. So a product like `abc`, or a plain `lcm`,
-  is sent to the reasoning model instead of SymPy. Upgrade path: MyScript "Raw Content" mode,
-  which separates words from math.
-- **Template questions:** algebra SymPy can't settle still gets them in both modes. Upgrade
-  path: the reasoning model words them in P3.
-- **Not streamed yet:** proof questions and answers show "Checking…" for about 5–10 s.
-- **Unverified logic:** SymPy checks only the algebra in a proof; logic steps (quantifiers,
-  cases, named theorems) are marked by having no ✓. The AI's Check and Answer on steps can be
-  wrong. Tuning belongs in the planned reasoning test.
-- **Solves are slow (20–70 s), hidden by solving in the background** once the page is labelled
-  after a pause. Pressing an action right after writing still waits (with a seconds counter).
-  Upgrade path: stream progress into the card (P3b).
-- **Problem lookup goes back one page.** Older problems: type them in the confirm box.
-- **Function names:** only f, g, h (and F, G, H) are read as functions; any other letter before
-  brackets, like n(n+1), is a product.
-
-**Accounts and identity:**
-- An **anonymous per-browser id** stands in for accounts until P4.
-- Model choices are saved per browser.
-
-**Not checked on real hardware or live services:**
-- MyScript's request shape was confirmed with real keys in smoke tests. The bake-off hasn't
-  been run yet; it needs 30–50 lines recorded on a pen device.
-- Real pen input (pressure, Apple Pencil, palm rejection) needs an iPad or pen device.
-
-**Small things:**
-- Readings under lines can't be selected while the pen is active.
-- The top bar wraps to two rows on narrower screens.
+- **Proofs by contradiction** get only the automation's local reasoning, so steps that need
+  Lean plumbing (casts between ℤ and ℝ, `Even p` as `p = r + r`) show "?": √2 is 0/6 in L0b.
+  Upgrade path: a stronger local tactic set, or single-claim proofs limited to local facts.
+- **"?" doesn't say why** the line failed (false, or a step too big for the automation).
+  Upgrade path: try to prove the line's negation to tell "false" from "couldn't verify"; show the
+  Lean goal as a hint.
+- **Lean reloads Mathlib on every run** (~5 s). Upgrade path: a warm REPL (Kimina) for ~1 s.
+- **No progress while checking**, only a seconds counter. Upgrade path: stream each line's
+  verdict as Lean reaches it.
+- **Which line is the problem** is a dropdown, defaulting to the first selected line.
+- **The card is placed next to the strokes**, not the readings under them, so long typed
+  readings can run under it.
+- **Line grouping** uses geometry only; **words rule**: any 3+ letter run sends a line to the
+  LLM reader.
+- **Anonymous per-browser id** until accounts (P4).
+- **Not checked on real hardware:** real pen input needs an iPad or pen device; the bake-off
+  needs 30–50 recorded lines (the recorder was removed with #27; it's in git history).
 
 ---
 
 ## 9. What's next
 
-### Where things stand (2026-10-19)
-- Everything through pasted images is committed on the `p1-p2-notebook` branch.
-- **Lean L0 is ready but not run.** On this 2-core, 8 GB Codespace a single check reloading all
-  of Mathlib ran over 7 minutes (the disk was thrashing: Mathlib's files are bigger than the
-  memory left to cache them). The Codespace has been switched to **4 cores, 16 GB**; it takes
-  effect after stopping and restarting the Codespace.
-- **Disk is the next limit:** 5.2 GB free of 32 GB. Running a Lean server in Docker needs its
-  own Mathlib (~7 GB), so `lean/.lake` (7.3 GB, a re-downloadable cache) would have to go.
+### Lean results (2026-10-20, Claude Sonnet 5.5; reports in `backend/leaneval/results/`)
+- **L0 (`leaneval/run.py`):** 25/25 problems proved, all first try, ~8 s each including Lean;
+  25/25 model-written statements typecheck, and all 25 were reviewed as faithful (differences
+  only in names and equivalent forms). DeepSeek V4 Pro proved 1 of its first 4, at up to
+  10 min each.
+- **L0b (`leaneval/steps.py`, `steps.json`):** 11 cases (10 problems + a wrong-reason case),
+  each with a correct student-style proof and one with a planted mistake.
 
-### Next steps for Lean (L0)
-1. Restart the Codespace on 16 GB; restart backend and frontend.
-2. Run **Kimina Lean Server** (from upstream `project-numina/kimina-lean-server`, not a fork) in
-   Docker with no network, a read-only filesystem and a memory cap, so Mathlib stays loaded in
-   warm REPLs (their benchmark: ~3.7 s per check). Point `leaneval/lean.py` at it, keeping our
-   cheat filter, statement assembly and `#print axioms` check.
-3. Run the 25-problem evaluation (DeepSeek V4 Pro and Claude Sonnet): proof success, statement
-   faithfulness, time and cost. Decide on L1 (a "proved in Lean" badge, hints from the proof
-   state) from the numbers, and record it in DECISIONS.md (it reverses #20's "no Lean for now").
+  | | v1 | v2 (current) |
+  |---|---|---|
+  | Correct lines ✓ | 32/44 | 42/48 (5 "skipped step"; all 6 misses are √2) |
+  | Correct proofs fully ✓ | 5/10 | 10/11 |
+  | Planted mistakes caught | 9/10 | 11/11 |
+  | False ✓ | 0 | 0 |
+  | Median per proof | ~10 s | 15 s |
+
+  The planted mistakes were written by us, not by students, and translation faithfulness varies
+  between runs: the two v2 runs before #28's last two rules let 1 and 2 mistakes through.
+
+### Next steps
+1. **Try it with real handwriting** on an iPad or pen device (needs the tldraw license key for
+   the forwarded URL).
+2. **Real student mistakes:** collect 20–30 and add them to `steps.json`; rerun L0b on each
+   prompt change, several times, since translations vary.
+3. **Tell "false" from "couldn't verify"** (§8), and stream verdicts.
+4. **A warm Lean server** (Kimina) and an always-on host for user tests.
+5. **User test #1:** 3–5 students, each working one proof.
+
+### Future: a skill tree (logged 2026-10-20, not started)
+A skill tree of the proof techniques and concepts a student has mastered, like achievements in
+games: induction, contradiction, contrapositive, cases, ε–δ, injectivity, divisibility,
+parity, … A technique lights up when Lean has checked proofs that use it. Lean makes this
+possible, because the translated proof names the structure each student used
+(`induction`, `by_contra`, `rcases`, which lemmas), so the tree can be built from checked work
+rather than self-reports. It needs accounts and the learning log (P4) to keep progress across
+devices.
 
 ### Waiting on you
-- **Restart the Codespace** to get the 16 GB machine, and OK deleting `lean/.lake` if needed.
-- **The direction questions in §10** (time, access to students, what success looks like).
-- **Bake-off samples:** record 30–50 handwritten lines on a pen device and run the bake-off.
 - **A tldraw license key:** for the forwarded URL and iPad tests.
+- **The direction questions in §10** (time, access to students, what success looks like).
 - **Open questions (SPEC §11):** commercial or not (this decides the tldraw license), sign-in
-  method, backend hosting, recognizer vendor pricing.
-
-### Build order (SPEC §9)
-- **P3b rest:** the ε–δ widget on the page, the reasoning-model test, streaming text into cards.
-- **User test #1:** 3–5 students on iPads, each working one proof.
-- **P4:** accounts, sync across devices, the learning log, and a progress view.
-- **P5:** PDF import and annotation, PDF export.
-- **P6:** handwriting search.
+  method, backend hosting (the Lean server needs an always-on ≥16 GB machine).
 
 ---
 
@@ -570,9 +418,12 @@ course; students sharing it or asking to pay; strangers signing up from clips.
 
 ### The open decision
 Too many directions at once (app, demand, benchmark, RL, Lean, images). Pick **one question
-for the next 4–6 weeks** and park the rest. Recommendation: get Mellow used in one intro-proofs
-course and learn from it (it feeds community, research, the startup option, and tells you
-whether Lean or RL is needed); keep Lean L0 as a side experiment. To settle it, answer:
+for the next 4–6 weeks** and park the rest.
+
+**Settled in part (2026-10-20):** Lean is the core of the product, not a side experiment
+(DECISIONS #25). The question for the next weeks becomes: *can Lean check a student's
+handwritten proof line by line, reliably and fast enough?* (L0, L0b, then L1 in the app). Getting
+it into one intro-proofs course stays the way to learn whether students use it. Still to answer:
 1. Hours per week for the next two months?
 2. Access to students in an intro-proofs course (as student, TA, or via a professor)?
 3. In two months, which would make you proudest: (a) 20 students using it weekly, (b) a

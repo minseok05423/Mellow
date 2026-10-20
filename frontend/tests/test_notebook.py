@@ -1,10 +1,9 @@
-"""P1 notebook checks: library, pages, drawing + raw ink, lasso, samples, undo, eraser, persistence.
+"""Notebook checks: library, pages, the stripped toolbar, drawing + raw ink, lasso, undo, eraser, persistence.
 
 Run (dev server must be up on :5173, see tests/README.md):
     python tests/test_notebook.py <screenshot_dir>
 Mouse only: pen pressure, palm rejection and coalesced Pencil events need a real device.
 """
-import json
 import sys
 
 from playwright.sync_api import sync_playwright
@@ -45,12 +44,12 @@ def stroke(page, pts):
 
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)
-    ctx = browser.new_context(viewport={"width": 1280, "height": 900}, accept_downloads=True)
+    ctx = browser.new_context(viewport={"width": 1280, "height": 900})
     page = ctx.new_page()
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.on("console", lambda m: m.type == "error" and errors.append(m.text))
-    # P1 is about the notebook itself: answer live-reading calls with "nothing read" (no backend needed).
+    # This is about the notebook itself: answer live-reading calls with "nothing read" (no backend needed).
     page.route("**/api/recognize", lambda r: r.fulfill(
         json={"latex": "", "confidence": None, "source": "none", "has_prose": False}))
 
@@ -66,6 +65,9 @@ with sync_playwright() as p:
     pages = shapes(page, "mellow-page")
     check(len(pages) == 1 and pages[0]["props"]["paper"] == "lined" and pages[0]["isLocked"], "one locked lined page")
     check(js(page, "return editor.getCurrentToolId()") == "draw", "pen tool active on open")
+    tools = page.locator(".tlui-main-toolbar [data-testid^='tools.']").evaluate_all("els => els.map(e => e.dataset.testid)")
+    check(sorted(tools) == ["tools.draw", "tools.eraser", "tools.hand", "tools.lasso-select", "tools.select"],
+          f"toolbar has only pen, eraser, lasso, select, hand ({tools})")
 
     # --- write a 'line' of three strokes: 2, q, ^2-ish squiggles ---
     stroke(page, [(120, 200), (140, 185), (160, 200), (120, 230), (165, 230)])
@@ -94,21 +96,6 @@ with sync_playwright() as p:
     check(sorted(sel) == ["draw", "draw", "draw"], f"lasso selects the 3 strokes, not the page ({sel})")
     check(js(page, "return editor.getCurrentToolId()") == "select", "lasso hands over to select tool")
     page.screenshot(path=f"{OUT}/p1_lassoed.png")
-
-    # --- save + download a bake-off sample ---
-    page.click("text=Save sample")
-    page.fill(".sample-form input", "2q^2")
-    page.click(".sample-form button[type=submit]")
-    page.wait_for_selector("text=Samples (1)")
-    check(True, "sample saved, counter shows 1")
-    with page.expect_download() as dl:
-        page.click("text=Samples (1)")
-    data = json.loads(open(dl.value.path()).read())
-    s0 = data["samples"][0]
-    check(data["schema_version"] == 1 and s0["truth"] == "2q^2" and s0["kind"] == "math", "download has the sample")
-    check(len(s0["strokes"]) == 3 and s0["image"].startswith("data:image/png"), "sample has 3 strokes + PNG")
-    xs = [pt[0] for st in s0["strokes"] for pt in st["pts"]]
-    check(min(xs) >= -1, "sample strokes are relative to the selection's top-left")
 
     # --- undo/redo keeps ink attached ---
     js(page, "editor.selectNone(); editor.setCurrentTool('draw')")

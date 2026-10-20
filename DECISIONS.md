@@ -184,7 +184,7 @@ build on the same answer, so they can't contradict each other and only the first
 pays for the solve. SymPy can't check logic (quantifiers, cases, named theorems), so each
 step is marked "✓ checked by SymPy" or "not machine-checked". Lean would check the logic
 too, but was left out for now: a mistranslated statement still gets a ✓, LLM-written Lean
-often doesn't compile, and running it needs a sandboxed service.
+often doesn't compile, and running it needs a sandboxed service. *(Reversed 2026-10-20 by #25: Lean is now the core.)*
 
 ## 21. Lines get roles and segments; context is found by structure, not RAG
 
@@ -249,3 +249,71 @@ view, curve samples, equation positions, label nudging); the model never places 
 the page. Only the model's figure is cached and the scene is compiled per request, so layout
 fixes reach old answers. Real tests (Pythagoras, odd numbers, triangle angles, AM-GM) all
 passed the checker first time; each picture takes 2-3 minutes at high effort.
+
+## 25. Mellow is a lightweight Lean prover on the tablet (reverses #20's "no Lean for now")
+
+Lean becomes the core of checking, not a side experiment. The tablet stays a thin client: it records ink, shows
+readings, the confirm box and cards; reading, LLM calls and Lean all run on a dedicated server, which keeps Mathlib
+loaded and runs model-written Lean in a sandbox. The point is to check the student's *logic*, not just their algebra:
+SymPy can only mark quantifiers, cases and named theorems "not machine-checked". The shape: the problem becomes a Lean
+statement that the student confirms through a plain-words back-translation (or that comes from a human-checked problem
+library), so a mistranslation can't earn a ✓; each confirmed line becomes a `have` that Lean's automation (ring,
+linarith, omega, simp, ...) must prove from the lines before it, so a failure lands on the student's own line; hints
+come from the remaining proof state. Verdicts are three: ✓ Lean proved the step, ✗ false (a counterexample from SymPy
+or Lean), and ? couldn't verify, which never means "wrong", since automation or translation may be what failed. SymPy
+stays as the fast first check for algebra and the counterexample finder. Two experiments gate the app work: L0 (can a
+model prove and state the intro problems?) and L0b (does line-by-line checking pass correct student proofs and fail
+planted mistakes, and how fast?).
+
+## 26. Mathlib lives on a local disk, not on the Codespace's /workspaces
+
+On this Codespace `/workspaces` is a loop-mounted disk image, and loading Mathlib (6 GB of build files, memory-mapped)
+from it thrashed: one check took over 300 s even with 16 GB of memory, with Lean at ~12% CPU and the disk reading
+300-500 MB/s. The same project copied to `/tmp` (a real local disk) takes ~50 s cold and ~5 s warm per check, so the
+checker reads `MELLOW_LEAN_DIR` (default: the repo's `lean/`). `/tmp` is wiped when the Codespace stops, so the copy is
+redone then. The sandbox now mounts its empty `/tmp` before binding the Lean project, which may live under it. A
+production server keeps Mathlib on local SSD; ~5 s per check is the cost of reloading Mathlib each time, and a warm
+Lean REPL (Kimina or leanprover-community/repl) removes most of it.
+
+## 27. The notebook is stripped to one feature: Check with Lean
+
+On 2026-10-20 the notebook was cut down to what a Lean check needs (the user's call: "only the lean+llm feature").
+Kept: the library, pages, pen, eraser, lasso, select, hand, raw ink, live reading (pasted images too, since a pasted
+problem sheet is a problem), the confirm box and cards. Removed: SymPy checking, Hint / Answer / Explain, animated
+boards and pictures, page labels and background solving, the Models menu, the bake-off sample recorder, the ε–δ demo,
+and shapes, text and arrows in the toolbar; they're in git history before this date. One action replaces the four:
+select a problem and its proof, confirm the readings and which line is the problem, confirm what Lean will prove (a
+second, cheaper model reads the Lean statement back in words, seeing only the Lean, so a mistranslation shows), then
+Lean checks the proof line by line and one card shows each line's verdict. The CLAUDE.md non-negotiable "SymPy
+verification" became "machine verification": Lean now gives every verdict, which keeps its point (no step is judged by
+an LLM alone) with a stronger checker. Lean runs on Claude Sonnet (L0: 25/25 problems; DeepSeek V4 Pro 1 of 4), with
+`LLM_TIMEOUT_S` raised to 120 s because Claude can think silently past 20 s; reading stays on its own models. Old
+notebooks still open: old card verdicts stay valid, and old animated boards show as plain cards, since tldraw won't
+load a document with an unknown shape type.
+
+## 28. How a line is judged (rules L0b forced)
+
+Each rule fixes a failure seen in L0b. A line counts as proved only once Lean prints a marker after it: a failing
+top-level tactic can end the proof with no error on later lines, which first showed up as a false ✓. When the fixed
+automation can't prove a claim, the model writes a proof of that claim alone and Lean checks it ("skipped step"):
+a false claim has no proof, and this took correct lines from 37/48 to 48/48. But not after "suppose, for
+contradiction": there the context is false by design, the model proved the false line "q² = 4r²" by finishing the
+contradiction itself, so such lines get only the automation's local reasoning (√2 proofs now show "?" on steps it
+can't do, the price of no false ✓). Assumptions keep the student's stated type (`intro x y (h : x = y)`), so Lean
+rejects one that doesn't match the goal; the model had silently replaced a student's assumed conclusion with the right
+hypothesis. Lean's errors go back to the model for a retry only when they're about the translation's structure, never
+which claims failed or a mismatched assumption, so a retry can't "repair" the student. A cited reason ("since g is
+injective") must work with the other hypotheses cleared, inside a block that leaves nothing behind. With these, L0b:
+11/11 planted mistakes caught, 0 false ✓, 42/48 correct lines proved (all misses in √2).
+
+## 29. Testers get the web app from EC2, not a native iPad app
+
+Asked for an iPad version in Swift, Flutter or Rust that a friend can run, the web app served over HTTPS won: an iPad
+can't install an app file handed to it (native needs an Apple Developer account and TestFlight or a registered
+device), every native toolchain for iOS needs a Mac, which we don't have, and a native app would mean rebuilding the
+tldraw canvas. The PWA is already the reference (SPEC §3, #1); Add to Home Screen gives it a full-screen icon. One EC2
+t3.xlarge runs everything (16 GB because a Lean check holds ~5 GB of Mathlib and a check runs up to 4 at once), with
+Caddy for HTTPS on an sslip.io name, so no domain is needed, and HTTPS is required anyway (`crypto.randomUUID` only
+works on secure pages). A shared access code in the invite link guards the API, because the anonymous per-browser
+caps alone let anyone with the URL spend the LLM budget by clearing storage. Revisit native only if Pencil latency in
+Safari fails the user test.

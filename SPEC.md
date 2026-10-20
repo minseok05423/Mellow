@@ -1,6 +1,9 @@
 # Mellow — Product Spec v2 (DRAFT, for review)
 
 Status: draft. Replaces the product sections of CLAUDE.md once approved.
+**2026-10-20: the app is stripped to one feature, Check with Lean (DECISIONS #27).** Where this spec
+describes Check / Hint / Answer / Explain, SymPy checking, animations or widgets, it describes code
+that was removed (in git history before that date); §4 "Checking with Lean" is what's built.
 Items marked **[default]** are my proposals where you haven't decided yet. Change them freely.
 
 ## 1. Product in one paragraph
@@ -9,6 +12,11 @@ Students write their own work on blank pages. When they **select** part of it, a
 assistant can check the step, explain it with a Manim-style animation, give a hint,
 or drop in an interactive visualization, drawn on the page next to their work.
 Notes and a learning log are saved to their account and synced across devices.
+
+**Mellow is a lightweight Lean prover that lives on the tablet** (DECISIONS #25): the
+student writes an ordinary handwritten proof, and Lean 4 + Mathlib checks its logic
+line by line. The tablet is a thin client; reading, LLM calls and Lean run on a
+dedicated server.
 
 Core principle (unchanged): the student does the generative work; the board
 responds to *their* reasoning. The assistant never takes over the page.
@@ -20,10 +28,10 @@ responds to *their* reasoning. The assistant never takes over the page.
 
   | Area | Checking | Typical feedback |
   |---|---|---|
-  | Algebraic proof steps (√2, induction, identities) | SymPy verdicts | verified / counterexample |
+  | Algebraic proof steps (√2, induction, identities) | SymPy first, Lean for the logic | verified / counterexample |
   | Calculus computation (derivatives, integrals) | SymPy verdicts | verified / counterexample |
-  | Sets, logic, quantifiers | partly SymPy (logic module) | verdict where provable, else questions |
-  | Limits, ε–δ, continuity | rarely provable | questions + widgets (M1 ε–δ) |
+  | Sets, logic, quantifiers, divisibility, induction | Lean + Mathlib | ✓ proved / ✗ false / ? couldn't verify |
+  | Limits, ε–δ, continuity | Lean where automation manages, else questions | questions + widgets (M1 ε–δ) |
 
 - **Reference device:** iPad + Apple Pencil in Safari (installed as a PWA).
   Daily development uses any pen device or a mouse; an iPad is borrowed for user tests.
@@ -92,6 +100,25 @@ starts solving in the background (DECISIONS #22). Context for an action is found
 steps so far, and definitions written earlier on the page. The problem an action
 is built from is shown in the confirm box, so a wrong label is fixed before
 anything is judged. Retrieval (RAG) over course material waits for P5's PDFs.
+
+**Checking with Lean (DECISIONS #25; gated by L0/L0b, §9):**
+1. **The statement.** The problem becomes a Lean statement, from a human-checked
+   problem library when the problem is in it, otherwise written by the model and
+   shown back in plain words in the confirm box. The student confirms it before
+   anything is judged: a mistranslated statement must never earn a ✓.
+2. **The steps.** Each confirmed line becomes `have hₖ : <claim> := by <automation>`
+   (ring, linarith, nlinarith, omega, simp, positivity, ...), proved from the
+   statement's hypotheses and the lines before it. The result lands on the
+   student's own line.
+3. **Three verdicts:** ✓ Lean proved the step; ✗ false (a counterexample from SymPy
+   or Lean); ? couldn't verify. "?" never means wrong: the translation or the
+   automation may be what failed, and the card says so.
+4. **Hints from the proof state:** what is left to prove after the student's lines,
+   worded by the reasoning model, which never sees more than the hint needs.
+5. **SymPy stays** as the fast first check on algebra and the counterexample finder.
+6. **Safety:** model-written Lean is code; it runs in a sandbox with no network, no
+   keys and a time limit, after a filter that rejects `sorry`, axioms and code
+   execution, and `#print axioms` confirms only Lean's standard axioms were used.
 
 **Visualize** (P3): inserts a widget (e.g. ε–δ) when the selection names a concept
 we have one for. Starting widget library: ε–δ continuity (exists as M1).
@@ -261,6 +288,10 @@ SymPy verification, API key server-side only. **Added:** confirm-before-judge.
     during build and testing.
   - A commercial license (price on request) is needed before charging anyone.
 - **Backend:** Python FastAPI, Pydantic, SymPy, SQLAlchemy over Postgres.
+- **Lean server:** Lean 4 + Mathlib (the `lean/` project) on an always-on machine with
+  ≥16 GB of memory and Mathlib on local SSD, run sandboxed (bwrap now, a locked-down
+  container in production). A warm REPL (Kimina or leanprover-community/repl) keeps
+  Mathlib loaded so a check costs about a second instead of ~5 s.
 
 ## 9. Build order (each phase ends with something usable)
 1. **P1 Notebook basics.**
@@ -285,11 +316,21 @@ SymPy verification, API key server-side only. **Added:** confirm-before-judge.
      an animated board; ε–δ ported as the first widget; streaming text into cards.
    - *Test:* a wrong step in an LLM answer is caught by SymPy before any student
      sees it; Hint on a mid-proof step uses the segment's problem.
-4. **User test #1:** 3–5 students on iPads, each working one proof with the
+4. **L: Lean core** (DECISIONS #25).
+   - L0: can a model prove the 25 intro problems in Lean (given our statements), and
+     state them faithfully? (`backend/leaneval`)
+   - L0b: line-by-line checking of student-style proofs: correct proofs and proofs
+     with a planted mistake on ~10 problems. Measures how many correct steps pass
+     (false "?"), how many wrong steps fail (no false ✓), and seconds per step.
+   - L1: Lean Check in the app: confirmed statement, per-line ✓ / ✗ / ?, hints from
+     the proof state, a warm Lean server. *Built 2026-10-20 without hints from the proof
+     state and without the warm server (DECISIONS #27).*
+   - *Test:* zero false ✓ on the planted mistakes; every "?" worded as "couldn't verify".
+5. **User test #1:** 3–5 students on iPads, each working one proof with the
    assistant. Decide what to change *before* building P4–P6.
-5. **P4 Accounts + sync + learning log + progress view.**
-6. **P5 PDF import/annotate + PDF export.**
-7. **P6 Handwriting search.**
+6. **P4 Accounts + sync + learning log + progress view.**
+7. **P5 PDF import/annotate + PDF export.**
+8. **P6 Handwriting search.**
 
 The current M1 code carries over: `anim.ts` and `plot.ts` become the engine inside
 board shapes, and the ε–δ demo becomes the first widget. The three open review
@@ -312,7 +353,8 @@ findings (check_step false verdict, validator crash, test location) get fixed in
 1. Is this meant to become commercial? This decides when we need a paid tldraw
    license, and whether the hobby key is enough for now.
 2. Sign-in: Google + email link OK, or does your target university use something else?
-3. Hosting for the backend and database (decide before P4; not needed earlier).
+3. Hosting for the backend, database and Lean server. The Lean server needs an
+   always-on ≥16 GB machine before user tests (L1); the rest can wait for P4.
 4. Recognition vendor pricing. MyScript's isn't public, and Mathpix's digital-ink
    pricing needs confirming. Ask both before the bake-off; a quote that's too high
    rules a vendor out before testing.

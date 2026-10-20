@@ -104,3 +104,10 @@ export function lineStrokes(line: Line) {
       };
     });
 }
+
+/** The selected pen strokes (shapes with recorded ink). */
+export function selectedInkShapes(editor: Editor): TLDrawShape[] {
+  return editor
+    .getSelectedShapes()
+    .filter((s): s is TLDrawShape => s.type === 'draw' && !!getInk(s as TLDrawShape));
+}

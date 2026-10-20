@@ -1,8 +1,5 @@
 // Calls to our backend (via Vite's /api proxy). The browser never talks to an LLM or recognition vendor.
 
-import { choices } from './models';
-import type { Scene } from './scene';
-
 function userId(): string {
   // shortcut: an anonymous per-browser id for daily caps and logs. Upgrade path: accounts in P4.
   let id = localStorage.getItem('mellow.user');
@@ -13,10 +10,19 @@ function userId(): string {
   return id;
 }
 
+// The server's access code arrives once in the invite link (?key=...) and is kept for later visits.
+// On iPad, Add to Home Screen keeps the link's ?key= as the app's start URL.
+const urlKey = new URLSearchParams(location.search).get('key');
+if (urlKey) localStorage.setItem('mellow.key', urlKey);
+
 async function post<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`/api${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Mellow-User': userId() },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Mellow-User': userId(),
+      'X-Mellow-Key': localStorage.getItem('mellow.key') ?? '',
+    },
     body: JSON.stringify(body),
   });
   if (!res.ok) {
@@ -33,43 +39,21 @@ export interface Reading {
   has_prose: boolean;
 }
 
-export interface CheckResult {
-  // verified / refuted / unverified come from SymPy; noted: nothing to judge (or no model);
-  // ai_check / hint / answer / explain come from the reasoning model and are labelled as the AI's
-  verdict: 'verified' | 'refuted' | 'unverified' | 'noted' | 'ai_check' | 'hint' | 'answer' | 'explain';
-  reason: string;
-  message: string; // may contain $...$ math
-  counterexample: Record<string, string>;
-  values: Record<string, string>;
-  compared_with: string | null;
-  scene?: Scene | null; // Explain on a problem: the checked proof as an animated board
+/** The problem as Lean states it, and what that says in words (from a second model that sees only the Lean). */
+export interface Statement { statement: string; in_words: string }
+
+export type LineVerdict = 'proved' | 'skipped step' | 'wrong reason' | 'not proved' | 'unchecked';
+export interface LeanCheck {
+  lines: { verdict: LineVerdict; message: string; lean: string[] }[];
+  complete: boolean;
+  message: string;
+  seconds: number;
 }
-
-export type Role = 'problem' | 'definition' | 'claim' | 'proof_step' | 'algebra' | 'concept' | 'note';
-export interface Structure { lines: { role: Role; segment: number }[]; segments: string[] }
-
-export type Kind = 'problem' | 'steps' | 'concept';
-export interface AssistBody {
-  action: 'hint' | 'answer' | 'explain';
-  kind: Kind;
-  selection: string;
-  problem: string | null;
-  work: string[];
-  definitions: string[];
-  style?: 'steps' | 'picture'; // Explain on a problem or concept: equations, or a picture (DECISIONS #24)
-  confirmed: true;
-}
-
-const reasoner = () => choices.get()?.reasoner;
 
 export const api = {
-  recognize: (body: { strokes: { t0: number; pts: number[][] }[]; image?: string; context: string[] }) => {
-    const c = choices.get();
-    return post<Reading>('/recognize', c ? { ...body, recognizer: c.recognizer, reader_model: c.reader } : body);
-  },
-  check: (body: { current: string; context: string[]; problem: string | null; confirmed: true }) =>
-    post<CheckResult>('/check', { ...body, reasoning_model: reasoner() }),
-  assist: (body: AssistBody) => post<CheckResult>('/assist', { ...body, reasoning_model: reasoner() }),
-  presolve: (problem: string) => post<{ queued: boolean }>('/presolve', { problem, reasoning_model: reasoner() }),
-  structure: (lines: string[]) => post<Structure>('/structure', { lines, reader_model: choices.get()?.reader }),
+  recognize: (body: { strokes: { t0: number; pts: number[][] }[]; image?: string; context: string[] }) =>
+    post<Reading>('/recognize', body),
+  statement: (problem: string) => post<Statement>('/lean/statement', { problem, confirmed: true }),
+  leanCheck: (statement: string, lines: string[]) =>
+    post<LeanCheck>('/lean/check', { statement, lines, confirmed: true }),
 };

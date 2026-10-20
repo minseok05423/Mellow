@@ -1,6 +1,6 @@
 # Mellow
-An LLM-assisted online blackboard with 3Blue1Brown-style animations.
-Project spec: [CLAUDE.md](CLAUDE.md). Design decisions: [DECISIONS.md](DECISIONS.md).
+A handwriting notebook that checks your proofs with Lean: write a proof by hand, select it, and Lean 4 + Mathlib
+checks it line by line. Overview: [PROJECT.md](PROJECT.md). Spec: [SPEC.md](SPEC.md). Decisions: [DECISIONS.md](DECISIONS.md).
 
 ## Run it
 
@@ -20,13 +20,21 @@ python3 -m venv .venv
 .venv/bin/uvicorn app.main:app --reload --port 8000
 # check: curl localhost:8000/health   or, via the frontend: curl localhost:5173/api/health
 ```
-Keys go in `backend/.env` (copy `backend/.env.example`; it's git-ignored). With no keys,
-everything still works: handwriting readings come back empty, and you type them in the
-confirm chip. Backend tests: `cd backend && .venv/bin/python -m pytest -q`.
+Keys go in `backend/.env` (copy `backend/.env.example`; it's git-ignored). Lean checking needs
+`ANTHROPIC_API_KEY`. Without a reader key, handwriting readings come back empty and you type them in the
+confirm box. Backend tests: `cd backend && .venv/bin/python -m pytest -q`.
 
-**Recognizer bake-off**: record samples in the notebook (*Save sample*), download
-them, then `cd backend && .venv/bin/python -m bakeoff.run ~/Downloads/mellow-samples-*.json`.
-The report lands in `backend/bakeoff/results/`.
+**Lean** (Lean 4 + Mathlib, the `lean/` project; the toolchain comes from elan). On Codespaces, Mathlib must sit on
+the local disk, not `/workspaces` (a check there takes over 5 minutes instead of ~5 s, DECISIONS #26):
+```bash
+cp -a lean /tmp/mellow-lean        # again after every Codespace restart: /tmp is wiped
+# backend/.env: MELLOW_LEAN_DIR=/tmp/mellow-lean
+curl localhost:8000/health         # "lean": true when the checker finds Mathlib
+```
+Lean runs sandboxed with bwrap (`sudo apt install bubblewrap` if it's missing).
+
+**Experiments**: `backend/leaneval/` (L0: can a model prove the problems; L0b: does line-by-line checking catch
+planted mistakes) and `backend/bakeoff/` (handwriting recognizers). Each file's docstring says how to run it.
 
 ### Port forwarding (Codespaces / VS Code)
 Open the **Ports** tab, forward 5173 (VS Code usually does this automatically when
@@ -43,19 +51,27 @@ Restart `npm run dev`. In VS Code's **Ports** tab, set port 5173 to *Public* if 
 iPad isn't signed in to GitHub, and open the forwarded URL in Safari. For a
 full-screen app, use Share → Add to Home Screen.
 
+### Putting it online for testers (EC2)
+Testers use the web app on their own iPad; there is no native app to install (DECISIONS #29). Scripts in `deploy/`:
+1. Log in the AWS CLI once: `aws configure` (an access key of an IAM user allowed to use EC2 and SSM).
+2. Put a tldraw key in `frontend/.env.local` (see above); the server counts as production.
+3. `deploy/launch.sh`, once: starts a t3.xlarge (16 GB, about $4/day while running) with a fixed IP and saves its
+   details and the testers' access code in `deploy/.instance` (git-ignored).
+4. `deploy/deploy.sh`, after every change: builds the frontend, copies the app and `backend/.env`'s keys to the
+   server, and sets up Lean, Mathlib, Python, HTTPS (Caddy + an sslip.io name) and the service. It prints the link
+   for testers: `https://<ip>.sslip.io/?key=<code>`. They open it in Safari, then Share → Add to Home Screen.
+
+Without the code in the link, the API answers 401, so a leaked bare URL can't spend the LLM budget. Also set a monthly
+spend limit in the Anthropic console. Pause billing with
+`aws ec2 stop-instances --instance-ids <id from deploy/.instance>` (and `start-instances`); the disk and IP cost
+about $7/month while it's stopped.
+
 ## What's here
-- **Notebook (P1)**: `http://localhost:5173/`. A library of notebooks, and lined, grid or
-  blank A4 pages. Pen, highlighter, eraser, lasso, shapes, text and images; undo; zoom.
-  Saves automatically in the browser. Every pen stroke also stores its raw points with
-  timestamps, for handwriting recognition later.
-  - **Bake-off samples**: lasso one handwritten line → *Save sample* → type the expected
-    LaTeX → *Save*. *Samples (n) ⤓* downloads them all as JSON for the recognizer test.
-- **Read + Check (P2)**: lines are read live, shown faintly under each line (*Readings
-  on/off*). Lasso a line → **Check ✓ / Hint / Answer / Explain with AI** → confirm or fix what was read (and what it is, and its problem) → SymPy or the reasoning model answers
-  against the line above → a feedback card appears next to the line: follows,
-  counterexample, or a question when it can't be settled algebraically.
-- **Models menu**: pick the handwriting reader, the image reader and the reasoning model.
-  Options without a configured key are disabled. `GET /api/models` shows what's available.
-- **M1 ε–δ demo**: `http://localhost:5173/epsdelta.html`. Drag ε and watch δ respond.
-- **Tests**: see `frontend/tests/README.md`.
-- **Spec**: `SPEC.md`. Build order is P1–P6 in §9.
+- **Notebook**: `http://localhost:5173/`. A library of notebooks, and lined, grid or blank A4 pages. Pen, eraser,
+  lasso, select, hand; undo; zoom. Saves automatically in the browser. Every pen stroke also stores its raw points
+  with timestamps, for handwriting recognition.
+- **Reading**: lines are read live and shown faintly under each line (*Readings on/off*).
+- **Check with Lean**: lasso a problem and its proof → **Check with Lean** → confirm or fix the readings and which
+  line is the problem → Lean states the problem, shown in plain words for you to confirm → Lean checks every line →
+  a card next to the proof: ✓ checked, ✓ true but a step is missing, ✗ wrong reason, ? couldn't verify.
+- **Tests**: backend `pytest`; frontend see `frontend/tests/README.md`.

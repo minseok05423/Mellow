@@ -1,0 +1,198 @@
+[
+ {
+  "id": "even_add",
+  "correct": [
+   "Since a is even, a = 2k for some integer k.",
+   "Since b is even, b = 2m for some integer m.",
+   "Then a + b = 2k + 2m = 2(k + m).",
+   "k + m is an integer, so a + b is even."
+  ],
+  "wrong": [
+   "Since a is even, a = 2k for some integer k.",
+   "Since b is even, b = 2m for some integer m.",
+   "Then a + b = 2k + 2m = 2(km).",
+   "km is an integer, so a + b is even."
+  ],
+  "wrong_line": 2,
+  "mistake": "factors 2k + 2m as 2(km)"
+ },
+ {
+  "id": "odd_sq",
+  "correct": [
+   "n is odd, so n = 2k + 1 for some integer k.",
+   "n^2 = (2k + 1)^2 = 4k^2 + 4k + 1",
+   "= 2(2k^2 + 2k) + 1",
+   "so n^2 is odd."
+  ],
+  "wrong": [
+   "n is odd, so n = 2k + 1 for some integer k.",
+   "n^2 = (2k + 1)^2 = 4k^2 + 2k + 1",
+   "= 2(2k^2 + k) + 1",
+   "so n^2 is odd."
+  ],
+  "wrong_line": 1,
+  "mistake": "expands (2k + 1)^2 with 2k instead of 4k"
+ },
+ {
+  "id": "n2_plus_n",
+  "correct": [
+   "n^2 + n = n(n + 1).",
+   "One of n and n + 1 is even.",
+   "So their product n(n + 1) is even.",
+   "Hence n^2 + n is even."
+  ],
+  "wrong": [
+   "n^2 + n = n(n + 1).",
+   "Both n and n + 1 are even.",
+   "So their product n(n + 1) is even.",
+   "Hence n^2 + n is even."
+  ],
+  "wrong_line": 1,
+  "mistake": "claims both consecutive integers are even"
+ },
+ {
+  "id": "dvd_trans",
+  "correct": [
+   "a | b, so b = ak for some integer k.",
+   "b | c, so c = bm for some integer m.",
+   "Then c = bm = (ak)m = a(km).",
+   "So a | c."
+  ],
+  "wrong": [
+   "a | b, so b = ak for some integer k.",
+   "b | c, so c = bm for some integer m.",
+   "Then c = bm = (ak)m = a(k + m).",
+   "So a | c."
+  ],
+  "wrong_line": 2,
+  "mistake": "(ak)m written as a(k + m)"
+ },
+ {
+  "id": "gauss_sum",
+  "correct": [
+   "We use induction on n.",
+   "Base case n = 0: both sides are 0.",
+   "Inductive step: assume 2(0 + 1 + ... + n) = n(n + 1).",
+   "Then 2(0 + 1 + ... + n + (n + 1)) = n(n + 1) + 2(n + 1)",
+   "= (n + 1)(n + 2).",
+   "This is the claim for n + 1."
+  ],
+  "wrong": [
+   "We use induction on n.",
+   "Base case n = 0: both sides are 0.",
+   "Inductive step: assume 2(0 + 1 + ... + n) = n(n + 1).",
+   "Then 2(0 + 1 + ... + n + (n + 1)) = n(n + 1) + 2(n + 1)",
+   "= (n + 1)(n + 3).",
+   "This is the claim for n + 1."
+  ],
+  "wrong_line": 4,
+  "mistake": "factors n(n + 1) + 2(n + 1) as (n + 1)(n + 3)"
+ },
+ {
+  "id": "sqrt2_irrational",
+  "correct": [
+   "Suppose for contradiction that \\sqrt{2} = p/q with p, q integers, q \\neq 0, in lowest terms.",
+   "Then 2 = p^2/q^2, so p^2 = 2q^2.",
+   "So p^2 is even, hence p is even: p = 2r.",
+   "Then 4r^2 = 2q^2, so q^2 = 2r^2.",
+   "So q is even too.",
+   "This contradicts p/q being in lowest terms."
+  ],
+  "wrong": [
+   "Suppose for contradiction that \\sqrt{2} = p/q with p, q integers, q \\neq 0, in lowest terms.",
+   "Then 2 = p^2/q^2, so p^2 = 2q^2.",
+   "So p^2 is even, hence p is even: p = 2r.",
+   "Then 4r^2 = 2q^2, so q^2 = 4r^2.",
+   "So q is even too.",
+   "This contradicts p/q being in lowest terms."
+  ],
+  "wrong_line": 3,
+  "mistake": "divides 4r^2 = 2q^2 by 2 on one side only"
+ },
+ {
+  "id": "inj_comp",
+  "correct": [
+   "Let x, y with g(f(x)) = g(f(y)).",
+   "Since g is injective, f(x) = f(y).",
+   "Since f is injective, x = y.",
+   "So g \\circ f is injective."
+  ],
+  "wrong": [
+   "Let x, y with x = y.",
+   "Then f(x) = f(y).",
+   "So g(f(x)) = g(f(y)).",
+   "So g \\circ f is injective."
+  ],
+  "wrong_line": 0,
+  "mistake": "assumes x = y and proves the converse of injectivity"
+ },
+ {
+  "id": "inj_comp_reason",
+  "problem": "inj_comp",
+  "correct": [
+   "Let x, y with g(f(x)) = g(f(y)).",
+   "Since g is injective, f(x) = f(y).",
+   "Since f is injective, x = y.",
+   "So g \\circ f is injective."
+  ],
+  "wrong": [
+   "Let x, y with g(f(x)) = g(f(y)).",
+   "Since f is injective, f(x) = f(y).",
+   "Since f is injective, x = y.",
+   "So g \\circ f is injective."
+  ],
+  "wrong_line": 1,
+  "mistake": "a true claim with the wrong reason: needs g injective, cites f"
+ },
+ {
+  "id": "preimage_inter",
+  "correct": [
+   "Let x. Then x \\in f^{-1}(A \\cap B) iff f(x) \\in A \\cap B",
+   "iff f(x) \\in A and f(x) \\in B",
+   "iff x \\in f^{-1}(A) and x \\in f^{-1}(B)",
+   "iff x \\in f^{-1}(A) \\cap f^{-1}(B)."
+  ],
+  "wrong": [
+   "Let x. Then x \\in f^{-1}(A \\cap B) iff f(x) \\in A \\cap B",
+   "iff f(x) \\in A or f(x) \\in B",
+   "iff x \\in f^{-1}(A) and x \\in f^{-1}(B)",
+   "iff x \\in f^{-1}(A) \\cap f^{-1}(B)."
+  ],
+  "wrong_line": 1,
+  "mistake": "reads membership of an intersection as 'or'"
+ },
+ {
+  "id": "two_xy",
+  "correct": [
+   "(x - y)^2 = x^2 - 2xy + y^2",
+   "and (x - y)^2 \\geq 0, so x^2 - 2xy + y^2 \\geq 0",
+   "so 2xy \\leq x^2 + y^2."
+  ],
+  "wrong": [
+   "(x - y)^2 = x^2 - 2xy - y^2",
+   "and (x - y)^2 \\geq 0, so x^2 - 2xy - y^2 \\geq 0",
+   "so 2xy \\leq x^2 + y^2."
+  ],
+  "wrong_line": 0,
+  "mistake": "sign error in the expansion of (x - y)^2"
+ },
+ {
+  "id": "eps_delta_sq",
+  "correct": [
+   "Let \\varepsilon > 0 and take \\delta = \\min(1, \\varepsilon/3) > 0.",
+   "Let x with |x - 1| < \\delta.",
+   "Then |x - 1| < 1, so 0 < x < 2 and |x + 1| < 3.",
+   "|x^2 - 1| = |x - 1||x + 1|",
+   "< 3\\delta \\leq \\varepsilon."
+  ],
+  "wrong": [
+   "Let \\varepsilon > 0 and take \\delta = \\min(1, \\varepsilon/2) > 0.",
+   "Let x with |x - 1| < \\delta.",
+   "Then |x - 1| < 1, so 0 < x < 2 and |x + 1| < 3.",
+   "|x^2 - 1| = |x - 1||x + 1|",
+   "< 3\\delta \\leq \\varepsilon."
+  ],
+  "wrong_line": 4,
+  "mistake": "δ = ε/2 is too big, so 3δ ≤ ε is false"
+ }
+]

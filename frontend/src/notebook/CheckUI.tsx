@@ -1,18 +1,14 @@
-// Readings under each line, and the selection actions (SPEC §4): select lines -> Check / Hint / Answer / Explain
-// -> confirm chip (readings, what the selection is, its problem) -> /check or /assist -> feedback card.
+// Readings under each line, and "Check with Lean" (SPEC §4, DECISIONS #27): select lines -> confirm the readings and
+// which line is the problem -> Lean states the problem, the student confirms it in words -> Lean checks the proof
+// line by line -> one card on the page.
 
 import katex from 'katex';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { EditorPortal, useEditor, useValue } from 'tldraw';
-import { api, type CheckResult, type Kind } from './api';
+import { Box, EditorPortal, useEditor, useValue } from 'tldraw';
+import { api, type LineVerdict, type Statement } from './api';
 import { MathText, addFeedback, lineText } from './feedback';
-import { Box } from 'tldraw';
-import { Line, getLines, linesAbove, linesForStrokes } from './lines';
-import { LineReading, getReadings, looksLikeWords, readingStatus, setReading, showReadings } from './readings';
-import { selectedInkShapes } from './samples';
-import { getPages } from './pages';
-import { addScene } from './scene';
-import { ActionContext, actionContext, ensureStructure, joinReadings } from './structure';
+import { Line, getLines, linesForStrokes, selectedInkShapes } from './lines';
+import { LineReading, getReadings, readingStatus, setReading, showReadings } from './readings';
 
 function Tex({ latex, className }: { latex: string; className?: string }) {
   return (
@@ -57,9 +53,10 @@ export function ReadingsOverlay() {
   );
 }
 
-/** One editable reading in the confirm chip. */
+/** One editable reading in the confirm box. */
 function ReadingRow({ label, value, onChange, startEditing, placeholder = 'Type what you wrote, in LaTeX', focus = true }: {
-  label: string; value: string; onChange: (v: string) => void; startEditing: boolean; placeholder?: string; focus?: boolean;
+  label: React.ReactNode; value: string; onChange: (v: string) => void; startEditing: boolean; placeholder?: string;
+  focus?: boolean;
 }) {
   const [editing, setEditing] = useState(startEditing);
   return (
@@ -83,71 +80,35 @@ function ReadingRow({ label, value, onChange, startEditing, placeholder = 'Type 
   );
 }
 
-type Action = 'check' | 'hint' | 'answer' | 'explain';
-const ACTIONS: { id: Action; label: string; title: string; go: string }[] = [
-  { id: 'check', label: 'Check ✓', title: 'Is what I wrote sound?', go: 'check it' },
-  { id: 'hint', label: 'Hint', title: 'A question toward the next step', go: 'give a hint' },
-  { id: 'answer', label: 'Answer', title: 'The answer, or whether these steps hold and how to fix them', go: 'answer' },
-  { id: 'explain', label: 'Explain with AI', title: 'A worked explanation', go: 'explain' },
-];
-const KINDS: { id: Kind; label: string }[] = [
-  { id: 'steps', label: 'proof steps' }, { id: 'problem', label: 'a problem' }, { id: 'concept', label: 'a concept' },
-];
+type Role = 'problem' | 'proof';
 
 interface ChipState {
-  action: Action;
   lines: Line[];
   texts: string[];
-  above: Line | undefined; // Check: the line an algebra step is checked against
-  previous: string;
-  labelling: boolean; // waiting for the page's labels
-  ctx: ActionContext | null;
-  kind: Kind;
-  problem: string; // the problem the selection works on (steps only); the student confirms or fixes it
-  problemRead: string; // the problem as read from the page, to tell whether the student changed it
-  style: 'steps' | 'picture'; // Explain on a problem or concept
+  roles: Role[];
+  typedProblem: string; // the problem, when none of the selected lines is it
+  step: 'readings' | 'stating' | 'statement' | 'checking';
+  statement: Statement | null;
 }
 
-// Same rule as the backend's verify.is_prose: words other than joining words make a line a statement.
-const CONNECTORS = new Set(['so', 'thus', 'hence', 'then', 'therefore', 'and', 'i.e.', 'ie', 'which', 'gives', 'implies']);
-const isProse = (latex: string) => looksLikeWords(latex.replace(/\\text\s*\{[^}]*\}/g, ' '))
-  || [...latex.matchAll(/\\text\s*\{([^}]*)\}/g)]
-    .flatMap((m) => m[1].toLowerCase().replace(/,/g, ' ').split(/\s+/))
-    .some((w) => w && !CONNECTORS.has(w.replace(/[.:;]+$/, '')));
-
-const RANK: Record<CheckResult['verdict'], number> = {
-  refuted: 3, unverified: 2, ai_check: 2, hint: 2, answer: 2, explain: 2, verified: 1, noted: 0,
+const ICON: Record<LineVerdict, string> = {
+  proved: '✓', 'skipped step': '✓', 'wrong reason': '✗', 'not proved': '?', unchecked: '–',
 };
 
-/** One answer for one Check: the most serious verdict, with every line's problem in the message. */
-function combine(results: { n: number; r: CheckResult }[]): CheckResult {
-  if (results.length === 1) return results[0].r;
-  const worst = results.map((x) => x.r).reduce((a, r) => (RANK[r.verdict] > RANK[a.verdict] ? r : a));
-  const problems = results.filter((x) => x.r.verdict !== 'verified');
-  const message = problems.length
-    ? problems.map((x) => `Line ${x.n}: ${x.r.message}`).join('\n')
-    : 'Every step follows from the line above it.';
-  return { ...worst, message };
-}
+// The problem last stated in this tab, so the next check on it needn't be typed again.
+let lastProblem = '';
 
-const NOTHING_TO_CHECK: Record<Exclude<Kind, 'steps'>, string> = {
-  problem: 'This is a problem, not a step, so there is nothing to check yet. Try Hint or Answer.',
-  concept: 'This is a concept, so there is nothing to check. Try Explain with AI.',
-};
-const noted = (message: string): CheckResult =>
-  ({ verdict: 'noted', reason: 'nothing_to_check', message, counterexample: {}, values: {}, compared_with: null });
-
-/** The action buttons next to selected lines, and the confirm chip (screen space, InFrontOfTheCanvas). */
+/** The "Check with Lean" button next to selected lines, and the confirm box (screen space, InFrontOfTheCanvas). */
 export function CheckUI() {
   const editor = useEditor();
   const [chip, setChip] = useState<ChipState | null>(null);
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [seconds, setSeconds] = useState(0);
   const chipRef = useRef<HTMLDivElement>(null);
+  const busy = chip?.step === 'stating' || chip?.step === 'checking';
 
-  // A live count while the model works: the first answer on a problem can take a minute.
-  // shortcut: elapsed time only. Upgrade path: stream progress into the card (P3b).
+  // A live count while Lean works: a check takes 10 s to a minute.
+  // shortcut: elapsed time only. Upgrade path: stream each line's verdict as Lean reaches it.
   useEffect(() => {
     if (!busy) return;
     setSeconds(0);
@@ -155,7 +116,7 @@ export function CheckUI() {
     return () => clearInterval(t);
   }, [busy]);
 
-  // Keep the chip on screen: lift it when it would run off the bottom (it grows as rows load).
+  // Keep the box on screen: lift it when it would run off the bottom (it grows as steps load).
   useLayoutEffect(() => {
     const el = chipRef.current;
     if (!el) return;
@@ -163,7 +124,7 @@ export function CheckUI() {
     if (over > 0) el.style.top = `${Math.max(8, el.offsetTop - over)}px`;
   });
 
-  // Show the buttons only when the selection is handwriting and nothing is being dragged.
+  // Show the button only when the selection is handwriting (or a pasted image) and nothing is being dragged.
   const target = useValue('check target', () => {
     if (!editor.isIn('select.idle')) return null;
     const ids = new Set<string>([...selectedInkShapes(editor), ...editor.getSelectedShapes().filter((s) => s.type === 'image')]
@@ -174,144 +135,121 @@ export function CheckUI() {
     return lines.length && bounds ? { lines, x: bounds.maxX, y: bounds.minY } : null;
   }, [editor]);
 
-  function open(sel: Line[], action: Action) {
+  function open(sel: Line[]) {
     const readings = getReadings(editor);
-    const above = linesAbove(getLines(editor), sel[0], 1)[0];
     setError('');
-    setChip({ action, lines: sel, texts: sel.map((l) => readings[l.key]?.latex ?? ''), above,
-      previous: above ? readings[above.key]?.latex ?? '' : '', labelling: true, ctx: null, kind: 'steps',
-      problem: '', problemRead: '', style: 'steps' });
-    // Labels for this page and the one before (usually already there from the pause after writing).
-    const pages = getPages(editor).map((p) => p.id);
-    const prev = pages[pages.indexOf(sel[0].pageId) - 1];
-    Promise.all([ensureStructure(editor, sel[0].pageId), prev ? ensureStructure(editor, prev) : null]).then((ss) => {
-      const ctx = actionContext(editor, ss, sel);
-      const problem = joinReadings(editor, ctx.problem);
-      setChip((c) => (c?.lines === sel ? { ...c, labelling: false, ctx, kind: ctx.kind, problem, problemRead: problem } : c));
-    });
+    // Usually the problem is written first: with several lines selected, the first one starts as the problem.
+    setChip({ lines: sel, texts: sel.map((l) => readings[l.key]?.latex ?? ''),
+      roles: sel.map((_, i) => (i === 0 && sel.length > 1 ? 'problem' : 'proof')),
+      typedProblem: lastProblem, step: 'readings', statement: null });
   }
 
-  async function confirmAndRun() {
+  const texts = chip?.texts.map((t) => t.trim()) ?? [];
+  const problem = chip
+    ? (chip.roles.includes('problem') ? texts.filter((_, i) => chip.roles[i] === 'problem').join(' ') : chip.typedProblem.trim())
+    : '';
+  const proof = chip ? texts.filter((t, i) => chip.roles[i] === 'proof' && t) : [];
+
+  async function state() {
     if (!chip) return;
-    const { action, lines: sel, above, previous, kind, ctx } = chip;
-    const texts = chip.texts.map((t) => t.trim());
-    const problem = kind === 'steps' ? chip.problem.trim() || null : null;
-    // Confirm-before-judge: store the student's confirmed readings first; only those are judged.
-    const keep = (k: string, latex: string) => {
-      const old: LineReading | undefined = getReadings(editor)[k];
-      setReading(editor, k, { latex, confidence: old?.confidence ?? null, source: old?.source ?? 'student', confirmed: true });
-    };
-    sel.forEach((l, i) => keep(l.key, texts[i]));
-    if (action === 'check' && above && previous.trim()) keep(above.key, previous.trim());
-    if (problem && problem === chip.problemRead.trim()) {
-      ctx?.problem.forEach((l) => { const r = getReadings(editor)[l.key]; if (r?.latex) keep(l.key, r.latex); });
-    }
-    const readings = getReadings(editor);
-    const box = Box.Common(sel.map((l) => l.box));
-    const prose = texts.some(isProse);
-    const shown = prose ? texts.filter(Boolean).join(' \\text{ } ') : texts.filter(Boolean).join(' \\quad ');
-    setBusy(true);
+    // Confirm-before-judge: store the student's confirmed readings; only those are ever checked.
+    chip.lines.forEach((l, i) => {
+      const old: LineReading | undefined = getReadings(editor)[l.key];
+      setReading(editor, l.key, { latex: texts[i], confidence: old?.confidence ?? null, source: old?.source ?? 'student',
+        confirmed: true });
+    });
+    setError('');
+    setChip({ ...chip, step: 'stating' });
     try {
-      if (action === 'check') {
-        if (kind !== 'steps') addFeedback(editor, box, shown, noted(NOTHING_TO_CHECK[kind]));
-        else {
-          const contextFor = (l: Line) => linesAbove(getLines(editor), l)
-            .map((a) => readings[a.key])
-            .filter((r) => r?.confirmed && r.latex)
-            .map((r) => r.latex);
-          // A statement written over several lines is one statement; math lines are steps, each checked on its
-          // own. Either way the student gets one card for one Check.
-          const jobs = prose
-            ? [{ n: 1, line: sel[0], latex: texts.filter(Boolean).join(' \\text{ } ') }]
-            : sel.map((l, i) => ({ n: i + 1, line: l, latex: texts[i] }))
-              // The first of several selected lines is the starting point unless something confirmed sits above it.
-              .filter((j, i) => j.latex && (i > 0 || sel.length === 1 || contextFor(j.line).length > 0));
-          const results = [];
-          for (const j of jobs) {
-            results.push({ n: j.n, r: await api.check({ current: j.latex, context: contextFor(j.line), problem, confirmed: true }) });
-          }
-          if (results.length) addFeedback(editor, box, shown, combine(results));
-        }
-      } else {
-        // An answer is a verdict, so its context is confirmed lines only; hints and explanations may use any reading.
-        const usable = (ls: Line[] = []) => ls.map((l) => readings[l.key])
-          .filter((r) => r?.latex && (action !== 'answer' || r.confirmed)).map((r) => r.latex);
-        const result = await api.assist({ action, kind, selection: texts.filter(Boolean).join('\n'), problem,
-          work: kind === 'steps' ? usable(ctx?.work) : [], definitions: usable(ctx?.definitions), confirmed: true,
-          style: action === 'explain' && kind !== 'steps' ? chip.style : 'steps' });
-        if (result.scene) addScene(editor, box, shown, result);
-        else addFeedback(editor, box, shown, result);
-      }
+      const statement = await api.statement(problem);
+      lastProblem = problem;
+      setChip((c) => c && { ...c, step: 'statement', statement });
+    } catch (e) {
+      setError((e as Error).message);
+      setChip((c) => c && { ...c, step: 'readings' });
+    }
+  }
+
+  async function check() {
+    if (!chip?.statement) return;
+    setError('');
+    setChip({ ...chip, step: 'checking' });
+    try {
+      const res = await api.leanCheck(chip.statement.statement, proof);
+      const rows = res.lines.map((l, i) => `${ICON[l.verdict]} ${lineText(proof[i])} — ${l.message}`);
+      const near = Box.Common(chip.lines.filter((_, i) => chip.roles[i] === 'proof').map((l) => l.box));
+      addFeedback(editor, near, problem, res.complete ? 'lean_complete' : 'lean_issues',
+        [...rows, res.message].join('\n'));
       setChip(null);
       editor.selectNone();
     } catch (e) {
       setError((e as Error).message);
-    } finally {
-      setBusy(false);
+      setChip((c) => c && { ...c, step: 'statement' });
     }
   }
 
   const status = useValue(readingStatus);
-  const verb = chip && ACTIONS.find((a) => a.id === chip.action)!.go;
   return (
     <EditorPortal>
       {target && !chip && (
         <div className="action-bar" style={{ left: target.x + 8, top: target.y - 4 }}
           onPointerDown={(e) => e.stopPropagation()}>
-          {ACTIONS.map((a) => (
-            <button key={a.id} className="action-btn" data-action={a.id}
-              title={a.title} onClick={() => open(target.lines, a.id)}>{a.label}</button>
-          ))}
+          <button className="action-btn" data-action="lean" title="Check this proof with Lean, line by line"
+            onClick={() => open(target.lines)}>Check with Lean</button>
         </div>
       )}
       {chip && (
         <div className="chip" ref={chipRef} style={{ left: Math.max(8, (target?.x ?? 200) - 120), top: (target?.y ?? 80) + 32 }}
           onPointerDown={(e) => e.stopPropagation()}>
-          {chip.lines.some((l) => status[l.key] === 'reading') && <div className="chip-note">Still reading…</div>}
-          {chip.lines.map((l, i) => (
-            <ReadingRow key={l.key} label={i ? 'Next line' : chip.lines.length > 1 ? 'I read your lines as' : 'I read your line as'}
-              value={chip.texts[i]} startEditing={!chip.texts[i]}
-              onChange={(v) => setChip({ ...chip, texts: chip.texts.map((t, k) => (k === i ? v : t)) })} />
-          ))}
-          {chip.labelling ? <div className="chip-note">Working out what this is…</div> : (
-            <div className="chip-row chip-kind">
-              <label className="chip-label" htmlFor="chip-kind">This is</label>
-              <select id="chip-kind" aria-label="This is" value={chip.kind}
-                onChange={(e) => setChip({ ...chip, kind: e.target.value as Kind })}>
-                {KINDS.map((k) => <option key={k.id} value={k.id}>{k.label}</option>)}
-              </select>
-              {chip.ctx?.description && <span className="chip-note">in “{chip.ctx.description}”</span>}
-            </div>
-          )}
-          {!chip.labelling && chip.action === 'explain' && chip.kind !== 'steps' && (
-            <div className="chip-row chip-kind">
-              <label className="chip-label" htmlFor="chip-style">Explain as</label>
-              <select id="chip-style" aria-label="Explain as" value={chip.style}
-                onChange={(e) => setChip({ ...chip, style: e.target.value as ChipState['style'] })}>
-                <option value="steps">{chip.kind === 'problem' ? 'step by step' : 'in words'}</option>
-                <option value="picture">a picture (geometric)</option>
-              </select>
-            </div>
-          )}
-          {!chip.labelling && chip.kind === 'steps' && (
-            <ReadingRow key={`problem-${chip.problemRead}`} label="The problem these steps work on" value={chip.problem}
-              startEditing={!chip.problem} placeholder="No problem found above. Type it, or leave empty" focus={false}
-              onChange={(v) => setChip({ ...chip, problem: v })} />
-          )}
-          {chip.action === 'check' && chip.kind === 'steps' && chip.above && (
-            <ReadingRow label="Checking it against the line above" value={chip.previous}
-              startEditing={!chip.previous} onChange={(v) => setChip({ ...chip, previous: v })} />
+          {chip.step === 'readings' || chip.step === 'stating' ? (
+            <>
+              {chip.lines.some((l) => status[l.key] === 'reading') && <div className="chip-note">Still reading…</div>}
+              {chip.lines.map((l, i) => (
+                <ReadingRow key={l.key} value={chip.texts[i]} startEditing={!chip.texts[i]}
+                  label={(
+                    <select aria-label={`Line ${i + 1} is`} value={chip.roles[i]}
+                      onChange={(e) => setChip({ ...chip, roles: chip.roles.map((r, k) => (k === i ? e.target.value as Role : r)) })}>
+                      <option value="problem">The problem</option>
+                      <option value="proof">Proof, line {chip.roles.slice(0, i + 1).filter((r) => r === 'proof').length || 1}</option>
+                    </select>
+                  )}
+                  onChange={(v) => setChip({ ...chip, texts: chip.texts.map((t, k) => (k === i ? v : t)) })} />
+              ))}
+              {!chip.roles.includes('problem') && (
+                <ReadingRow label="The problem this proves" value={chip.typedProblem} startEditing={!chip.typedProblem}
+                  placeholder="Type the problem, e.g. the sum of two even integers is even" focus={false}
+                  onChange={(v) => setChip({ ...chip, typedProblem: v })} />
+              )}
+              {chip.step === 'stating' && <div className="chip-note">Stating the problem in Lean… {seconds} s</div>}
+            </>
+          ) : (
+            <>
+              <div className="chip-label">Lean will check that your proof shows:</div>
+              <div className="chip-read chip-words"><MathText text={chip.statement!.in_words} /></div>
+              <code className="chip-lean" title="The statement in Lean">{chip.statement!.statement}</code>
+              {chip.step === 'checking' && (
+                <div className="chip-note">Checking {proof.length} line{proof.length > 1 ? 's' : ''} with Lean… {seconds} s</div>
+              )}
+            </>
           )}
           {error && <div className="chip-error">{error}</div>}
-          {busy && chip.action !== 'check' && (
-            <div className="chip-note">Thinking… {seconds} s{seconds >= 5 ? ' · the first answer on a problem can take a minute' : ''}</div>
-          )}
           <div className="chip-actions">
             <button onClick={() => setChip(null)}>Cancel</button>
-            <button className="primary" disabled={busy || chip.labelling || !chip.texts.some((t) => t.trim())}
-              onClick={confirmAndRun}>
-              {busy ? (chip.action === 'check' ? 'Checking…' : 'Thinking…') : `Looks right, ${verb}`}
-            </button>
+            {chip.step === 'readings' || chip.step === 'stating' ? (
+              <button className="primary" disabled={busy || !problem || proof.length === 0} onClick={state}
+                title={proof.length ? '' : 'Mark at least one line as proof'}>
+                {chip.step === 'stating' ? 'Stating…' : 'Looks right, next'}
+              </button>
+            ) : (
+              <>
+                <button disabled={busy} onClick={() => setChip({ ...chip, step: 'readings', statement: null })}>
+                  Not what I meant
+                </button>
+                <button className="primary" disabled={busy} onClick={check}>
+                  {chip.step === 'checking' ? 'Checking…' : 'Yes, check my proof'}
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}

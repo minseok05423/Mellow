@@ -9,6 +9,7 @@ def tmp_db(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "test.sqlite3"))
     monkeypatch.setattr(config, "DEEPSEEK_API_KEY", "")  # tests never reach a real API with the .env keys
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(config, "ACCESS_CODE", "")
     llm.set_provider(None)
     yield
     llm.set_provider(None)

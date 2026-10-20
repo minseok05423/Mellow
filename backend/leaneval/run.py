@@ -1,6 +1,6 @@
 """L0 Lean experiment: can a model prove intro-proof problems in Lean 4 + Mathlib, and state them faithfully?
 
-    .venv/bin/python -m leaneval.run [--models deepseek-v4-pro,claude-sonnet-5-5] [--only id,id] [--attempts 4]
+    .venv/bin/python -m leaneval.run [--models claude-sonnet-5-5,deepseek-v4-pro] [--only id,id] [--attempts 4]
 
 Two separate measurements per problem and model:
 - prove: given our hand-written statement, write a proof Lean accepts (compiler errors go back to the model);
@@ -11,16 +11,15 @@ Writes leaneval/results/<timestamp>/{report.md,results.json}. Every model call g
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import time
 from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from app import config, llm, store
+from app import config, lean, llm, store
+from app.leancheck import FORMALIZE_SYSTEM, LeanStatement, _id
 from bakeoff.run import PER_MTOK
-from leaneval import lean
 
 HERE = Path(__file__).resolve().parent
 USER = "lean-eval"
@@ -34,24 +33,10 @@ Never use sorry, admit, axioms, native_decide, #eval, or search tactics like exa
 Prefer robust tactics: intro, obtain, use, constructor, induction, simp, ring, omega, linarith, nlinarith, positivity,
 norm_num, field_simp, gcongr, and named Mathlib lemmas. If the checker reports errors, fix them."""
 
-FORMALIZE_SYSTEM = """You translate a first-year university math problem into a Lean 4 + Mathlib theorem statement.
-Return JSON with statement: the binders and the type that come after the theorem's name, for example
-"(n : ℤ) (h : Odd n) : Odd (n ^ 2)". Be faithful: exactly the problem's hypotheses, nothing weaker or stronger, no
-extra assumptions, standard Mathlib definitions (Even, Odd, Nat.Prime, Irrational, Function.Injective, Set, Real.sqrt,
-Finset.sum, Filter.Tendsto, ContinuousOn ...). Do not write a proof."""
-
 
 class LeanProof(BaseModel):
     proof: str = Field(min_length=1, max_length=8000)
     helpers: str = Field("", max_length=8000)
-
-
-class LeanStatement(BaseModel):
-    statement: str = Field(min_length=1, max_length=2000)
-
-
-def _id(s: str) -> str:
-    return hashlib.sha256(s.encode()).hexdigest()[:12]
 
 
 def prove(p: dict, model: str, attempts: int) -> dict:
@@ -111,7 +96,7 @@ def cost(model: str, since: float) -> float | None:
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--models", default="deepseek-v4-pro,claude-sonnet-5-5")
+    ap.add_argument("--models", default="claude-sonnet-5-5")  # DeepSeek V4 Pro proved 1 of 4 at up to 10 min each
     ap.add_argument("--only", default="")
     ap.add_argument("--attempts", type=int, default=4)
     args = ap.parse_args()

@@ -1,13 +1,15 @@
-// Feedback cards: the board's reply to Check, Hint, Answer or Explain, drawn on the page as an ordinary shape the
-// student can move or delete (SPEC §4 board objects). Placement is deterministic code, never the LLM.
+// Feedback cards: the board's reply to "Check with Lean", drawn on the page as an ordinary shape the student can move
+// or delete (SPEC §4 board objects). Placement is deterministic code, never the LLM.
 
 import katex from 'katex';
 import { Box, Editor, HTMLContainer, Rectangle2d, ShapeUtil, T, TLShape, createShapeId } from 'tldraw';
-import type { CheckResult } from './api';
 import { getPages } from './pages';
 
 const TYPE = 'mellow-feedback';
-type Verdict = CheckResult['verdict'];
+// Cards from removed features (SymPy checks, hints, answers, explanations) keep their verdicts, so old notebooks load.
+const VERDICTS = ['verified', 'refuted', 'unverified', 'noted', 'answer', 'ai_check', 'hint', 'explain',
+  'lean_complete', 'lean_issues'] as const;
+export type Verdict = (typeof VERDICTS)[number];
 
 declare module '@tldraw/tlschema' {
   interface TLGlobalShapePropsMap {
@@ -17,10 +19,10 @@ declare module '@tldraw/tlschema' {
 export type FeedbackShape = TLShape<typeof TYPE>;
 
 const ICON: Record<Verdict, string> = { verified: '✓', refuted: '✗', unverified: '?', noted: '•', ai_check: '◇', hint: '?',
-  answer: '✦', explain: '❋' };
-// Anything from the reasoning model says so, and never reuses SymPy's "Follows" / "Counterexample" (DECISIONS #19).
+  answer: '✦', explain: '❋', lean_complete: '✓', lean_issues: '?' };
 const TITLE: Record<Verdict, string> = { verified: 'Follows', refuted: 'Counterexample', unverified: 'Question', noted: 'Noted',
-  ai_check: 'Check · AI, not verified', hint: 'Hint', answer: 'Answer · AI', explain: 'Explanation · AI' };
+  ai_check: 'Check · AI, not verified', hint: 'Hint', answer: 'Answer · AI', explain: 'Explanation · AI',
+  lean_complete: 'Checked by Lean', lean_issues: 'Lean check' };
 
 /** Renders text with $...$ math segments via KaTeX. Models also write \(...\), \[...\] and $$...$$
  * despite the prompt, so those become $...$ first. */
@@ -50,7 +52,7 @@ export class FeedbackShapeUtil extends ShapeUtil<FeedbackShape> {
     w: T.number,
     h: T.number,
     // New values only ever get added here, so notebooks saved earlier still load.
-    verdict: T.literalEnum('verified', 'refuted', 'unverified', 'noted', 'answer', 'ai_check', 'hint', 'explain'),
+    verdict: T.literalEnum(...VERDICTS),
     message: T.string,
     line: T.string,
   };
@@ -112,7 +114,7 @@ export function placeNear(editor: Editor, near: Box, w: number, h: number): { x:
     { x: near.maxX + 24, y: near.minY },
     { x: Math.max(page?.x ?? 0, near.minX), y: near.maxY + 12 },
   ].filter((p) => p.x + w <= pageRight - 8);
-  // Prefer a spot that stays on the page (a tall explanation board would otherwise hang off its bottom):
+  // Prefer a spot that stays on the page (a tall card would otherwise hang off its bottom):
   // stepping down first, then up; failing that, anywhere free below.
   const pageBottom = page ? page.y + page.props.h - 8 : Infinity;
   const down = Array.from({ length: 38 }, (_, i) => i * 16);
@@ -129,12 +131,12 @@ export function placeNear(editor: Editor, near: Box, w: number, h: number): { x:
   return { x: near.minX, y: near.maxY + 12 };
 }
 
-export function addFeedback(editor: Editor, near: Box, line: string, result: CheckResult) {
+export function addFeedback(editor: Editor, near: Box, line: string, verdict: Verdict, message: string) {
   // Height estimate from text length, per line of the message (the card can't measure KaTeX before it exists).
-  const long = result.message.length > 600; // worked answers and explanations get a wider card
+  const long = message.length > 600;
   const w = long ? 380 : 300;
   const perRow = long ? 50 : 38;
-  const rows = result.message.split('\n').reduce((n, part) => n + Math.max(1, Math.ceil(part.length / perRow)), 0);
+  const rows = message.split('\n').reduce((n, part) => n + Math.max(1, Math.ceil(part.length / perRow)), 0);
   const h = 44 + Math.ceil(line.length / 45) * 20 + rows * 20;
   const { x, y } = placeNear(editor, near, w, h);
   editor.createShape<FeedbackShape>({
@@ -142,6 +144,50 @@ export function addFeedback(editor: Editor, near: Box, line: string, result: Che
     type: TYPE,
     x,
     y,
-    props: { w, h, verdict: result.verdict, message: result.message, line },
+    props: { w, h, verdict, message, line },
   });
+}
+
+const SCENE = 'mellow-scene';
+declare module '@tldraw/tlschema' {
+  interface TLGlobalShapePropsMap {
+    [SCENE]: { w: number; h: number; scene: string; line: string; message: string };
+  }
+}
+type SceneShape = TLShape<typeof SCENE>;
+
+/** Animated explanations were removed (DECISIONS #27); old notebooks still hold them, and tldraw won't open a document
+ * with a shape type it doesn't know. They show as a plain card with their text. */
+export class LegacySceneShapeUtil extends ShapeUtil<SceneShape> {
+  static override type = SCENE;
+  static override props = { w: T.number, h: T.number, scene: T.string, line: T.string, message: T.string };
+
+  getDefaultProps(): SceneShape['props'] {
+    return { w: 300, h: 96, scene: '', line: '', message: '' };
+  }
+
+  getGeometry(shape: SceneShape) {
+    return new Rectangle2d({ width: shape.props.w, height: shape.props.h, isFilled: true });
+  }
+
+  override canResize() { return false; }
+  override hideRotateHandle() { return true; }
+
+  component(shape: SceneShape) {
+    return (
+      <HTMLContainer className="feedback feedback-explain" style={{ width: shape.props.w, height: shape.props.h }}>
+        <div className="feedback-head"><span>Explanation (no longer animated)</span></div>
+        <div className="feedback-body" style={{ overflow: 'auto' }}>
+          <MathText className="feedback-line" text={lineText(shape.props.line)} />
+          <MathText className="feedback-msg" text={shape.props.message} />
+        </div>
+      </HTMLContainer>
+    );
+  }
+
+  getIndicatorPath(shape: SceneShape) {
+    const p = new Path2D();
+    p.roundRect(0, 0, shape.props.w, shape.props.h, 8);
+    return p;
+  }
 }
