@@ -9,9 +9,13 @@ for DeepSeek or another host without touching endpoint code.
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
+import threading
 import time
+from collections import Counter
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, Protocol, TypeVar
 
 import httpx2 as httpx
@@ -156,15 +160,57 @@ class DeepSeekProvider:
                           input_tokens=usage.get("prompt_tokens", 0), output_tokens=usage.get("completion_tokens", 0))
 
 
+class QueueProvider:
+    """Model calls answered by Claude Code agents instead of an API (leaneval/agentq.py): each call becomes
+    DIR/<n>.request.json and waits for DIR/<n>.answer.json. An agent is a stand-in for the API model and must answer
+    from the request alone. `copy` counts identical requests (the judges of one step), so agents answering different
+    copies stay independent."""
+
+    name = "agent"
+    WAIT_S = 3 * 3600
+
+    def __init__(self, folder: Path):
+        self.folder = folder
+        folder.mkdir(parents=True, exist_ok=True)
+        self.ids = itertools.count(1)
+        self.copies: Counter[str] = Counter()
+        self.lock = threading.Lock()
+
+    def complete(self, *, model, system, messages, schema, effort, max_tokens, on_token=None):
+        body = {"system": system, "messages": messages, "schema": schema.model_json_schema()}
+        same = hashlib.sha256(json.dumps(body, sort_keys=True).encode()).hexdigest()
+        with self.lock:
+            n, copy = next(self.ids), self.copies[same]
+            self.copies[same] += 1
+        req, ans = self.folder / f"{n}.request.json", self.folder / f"{n}.answer.json"
+        tmp = req.with_suffix(".tmp")
+        tmp.write_text(json.dumps({"id": n, "copy": copy, **body}, ensure_ascii=False, indent=1))
+        tmp.rename(req)  # atomic: an agent never reads half a request
+        t = time.time()
+        while not ans.exists():
+            if time.time() - t > self.WAIT_S:
+                return Completion(text="no answer from the agent", parsed=None)
+            time.sleep(1)
+        time.sleep(0.2)  # let the writer finish
+        text = ans.read_text()
+        try:
+            return Completion(text=text, parsed=schema.model_validate_json(text))
+        except ValidationError as e:
+            return Completion(text=f"{text}\n\n{e}", parsed=None)
+
+
 _override: Provider | None = None
 _providers: dict[str, Provider] = {}
 
 
 def get_provider(model: str) -> Provider:
-    """Route by model name: deepseek-* -> DeepSeek's API, everything else -> Claude."""
+    """Route by model name: deepseek-* -> DeepSeek's API, everything else -> Claude; every call to agents when
+    MELLOW_AGENT_QUEUE is set."""
     if _override is not None:
         return _override
-    kind = "deepseek" if model.startswith("deepseek-") else "anthropic"
+    kind = "agent" if config.AGENT_QUEUE else "deepseek" if model.startswith("deepseek-") else "anthropic"
+    if kind == "agent":
+        return _providers.setdefault("agent", QueueProvider(Path(config.AGENT_QUEUE)))
     if kind not in _providers:
         _providers[kind] = DeepSeekProvider() if kind == "deepseek" else ClaudeProvider()
     return _providers[kind]

@@ -28,6 +28,10 @@ FALLBACK_READER_MODEL = env("FALLBACK_READER_MODEL", "deepseek-flash")  # must a
 # Lean (DECISIONS #25, #27): Claude, which proved 25/25 problems in L0 where DeepSeek V4 Pro proved 1 of 4.
 LEAN_MODEL = env("LEAN_MODEL", "claude-sonnet-5-5")  # statements, translations, single-claim proofs
 LEAN_WORDS_MODEL = env("LEAN_WORDS_MODEL", "claude-haiku-5-5")  # reads a statement back in words, independently
+# The graph check (DECISIONS #32): the graph, the steps' SymPy/Lean forms, and the three judges.
+CHECK_MODEL = env("CHECK_MODEL", "claude-sonnet-5-5")
+# When set, every model call is answered by Claude Code agents through this folder (leaneval/agentq.py), not an API.
+AGENT_QUEUE = env("MELLOW_AGENT_QUEUE")
 DEEPSEEK_API_KEY = env("DEEPSEEK_API_KEY")  # native API (DECISIONS #13)
 DEEPSEEK_BASE_URL = env("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 # Longest wait between streamed chunks: Claude at high effort can think silently for over 20 s.
@@ -43,9 +47,12 @@ CAPS = {
     "read_llm": int(env("CAP_READ_LLM", "200")),
     "reason": int(env("CAP_REASON", "50")),  # the leaneval experiments' class
     "lean": int(env("CAP_LEAN", "300")),  # model calls for Lean: a statement is 2, a check 1-10
+    "check": int(env("CAP_CHECK", "600")),  # model calls for the graph check: about 2 + 3 per judged step
 }
 
 
 def llm_configured(model: str) -> bool:
     """Is there a key for the provider serving `model`?"""
+    if AGENT_QUEUE:
+        return True
     return bool(DEEPSEEK_API_KEY) if model.startswith("deepseek-") else bool(env("ANTHROPIC_API_KEY"))

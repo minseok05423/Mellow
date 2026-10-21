@@ -1,11 +1,11 @@
-// Readings under each line, and "Check with Lean" (SPEC §4, DECISIONS #27): select lines -> confirm the readings and
-// which line is the problem -> Lean states the problem, the student confirms it in words -> Lean checks the proof
-// line by line -> one card on the page.
+// Readings under each line, and "Check my proof" (DECISIONS #32): select lines -> confirm the readings and which line
+// is the problem -> the proof as a graph of steps, which the student confirms -> each step checked on its own (Lean,
+// SymPy or three judges) -> one card on the page, every verdict with its tier.
 
 import katex from 'katex';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Box, EditorPortal, useEditor, useValue } from 'tldraw';
-import { api, type LineVerdict, type Statement } from './api';
+import { api, type Graph, type NodeVerdict, type Tier } from './api';
 import { MathText, addFeedback, lineText } from './feedback';
 import { Line, getLines, linesForStrokes, selectedInkShapes } from './lines';
 import { LineReading, getReadings, readingStatus, setReading, showReadings } from './readings';
@@ -87,22 +87,23 @@ interface ChipState {
   texts: string[];
   roles: Role[];
   typedProblem: string; // the problem, when none of the selected lines is it
-  step: 'readings' | 'stating' | 'statement' | 'checking';
-  statement: Statement | null;
+  step: 'readings' | 'graphing' | 'graph' | 'checking';
+  graph: Graph | null;
   id: string; // ties this check's events together
 }
 
-// A gap (the model filled a step) and a wrong reason aren't ✓: only a line Lean checked as written is.
-const ICON: Record<LineVerdict, string> = {
-  proved: '✓', 'skipped step': '⋯', 'wrong reason': '~', false: '✗', 'not given': '✗', 'not proved': '?', unchecked: '–',
-};
+const ICON: Record<NodeVerdict['status'], string> = { ok: '✓', wrong: '✗', unsure: '?' };
+// Every verdict says how far to trust it: only Proved is certain.
+const TIER: Record<Tier, string> = { proved: 'Proved by Lean', tested: 'Tested', judged: 'Judged by AI' };
+const KIND = { given: 'Given', assume: 'Assume', choose: 'Choose', claim: 'Claim' } as const;
 
-// The problem last stated in this tab, so the next check on it needn't be typed again.
+// The problem last checked in this tab, so the next check on it needn't be typed again.
 let lastProblem = '';
-// Statements the student confirmed, by problem: checking the same problem again skips that confirm and its wait.
-const confirmedStatements = new Map<string, Statement>();
+// Graphs the student confirmed, by problem and proof: checking the same proof again skips that confirm and its wait.
+const confirmedGraphs = new Map<string, Graph>();
+const graphKey = (problem: string, proof: string[]) => JSON.stringify([problem, proof]);
 
-/** The "Check with Lean" button next to selected lines, and the confirm box (screen space, InFrontOfTheCanvas). */
+/** The "Check my proof" button next to selected lines, and the confirm box (screen space, InFrontOfTheCanvas). */
 export function CheckUI() {
   const editor = useEditor();
   const [chip, setChip] = useState<ChipState | null>(null);
@@ -111,7 +112,7 @@ export function CheckUI() {
   const chipRef = useRef<HTMLDivElement>(null);
   // After a ✗ or ?, one optional question: what the student does next is the friends test's key signal.
   const [ask, setAsk] = useState<string | null>(null);
-  const busy = chip?.step === 'stating' || chip?.step === 'checking';
+  const busy = chip?.step === 'graphing' || chip?.step === 'checking';
 
   // Leaving during a wait is the strongest sign the wait is too long.
   useEffect(() => {
@@ -121,8 +122,8 @@ export function CheckUI() {
     return () => document.removeEventListener('visibilitychange', left);
   }, [busy, chip?.id, chip?.step]);
 
-  // A live count while Lean works: a check takes 10 s to a minute.
-  // shortcut: elapsed time only. Upgrade path: stream each line's verdict as Lean reaches it.
+  // A live count while the checker works: a check takes 10 s to a minute.
+  // shortcut: elapsed time only. Upgrade path: stream each step's verdict as it lands.
   useEffect(() => {
     if (!busy) return;
     setSeconds(0);
@@ -155,7 +156,7 @@ export function CheckUI() {
     // Usually the problem is written first: with several lines selected, the first one starts as the problem.
     setChip({ lines: sel, texts: sel.map((l) => readings[l.key]?.latex ?? ''),
       roles: sel.map((_, i) => (i === 0 && sel.length > 1 ? 'problem' : 'proof')),
-      typedProblem: lastProblem, step: 'readings', statement: null, id: crypto.randomUUID() });
+      typedProblem: lastProblem, step: 'readings', graph: null, id: crypto.randomUUID() });
     setAsk(null);
   }
 
@@ -165,7 +166,7 @@ export function CheckUI() {
     : '';
   const proof = chip ? texts.filter((t, i) => chip.roles[i] === 'proof' && t) : [];
 
-  async function state() {
+  async function makeGraph() {
     if (!chip) return;
     // Confirm-before-judge: store the student's confirmed readings; only those are ever checked.
     chip.lines.forEach((l, i) => {
@@ -174,13 +175,13 @@ export function CheckUI() {
         confirmed: true });
     });
     setError('');
-    const known = confirmedStatements.get(problem);
-    if (known) return check({ ...chip, statement: known });
-    setChip({ ...chip, step: 'stating' });
+    const known = confirmedGraphs.get(graphKey(problem, proof));
+    if (known) return check({ ...chip, graph: known });
+    setChip({ ...chip, step: 'graphing' });
     try {
-      const statement = await api.statement(problem);
+      const graph = await api.graph(problem, proof);
       lastProblem = problem;
-      setChip((c) => c && { ...c, step: 'statement', statement });
+      setChip((c) => c && { ...c, step: 'graph', graph });
     } catch (e) {
       setError((e as Error).message);
       setChip((c) => c && { ...c, step: 'readings' });
@@ -188,26 +189,29 @@ export function CheckUI() {
   }
 
   async function check(c = chip) {
-    if (!c?.statement) return;
-    const statement = c.statement;
+    if (!c?.graph) return;
+    const graph = c.graph;
     setError('');
     setChip({ ...c, step: 'checking' });
-    confirmedStatements.set(problem, statement);
-    api.event('check_started', c.id, { problem, lines: proof.length, again: c !== chip });
+    confirmedGraphs.set(graphKey(problem, proof), graph);
+    api.event('check_started', c.id, { problem, lines: proof.length, steps: graph.nodes.length, again: c !== chip });
     try {
-      const res = await api.leanCheck(statement.statement, proof);
-      const rows = res.lines.map((l, i) => `${ICON[l.verdict]} ${lineText(proof[i])}${l.message ? ` — ${l.message}` : ''}`);
+      const res = await api.check(graph);
+      const rows = res.nodes.map((v) => `${ICON[v.status]} [${v.node}] ${graph.nodes[v.node].text} · ${TIER[v.tier]}`
+        + (v.message ? ` — ${v.message}` : ''));
       const near = Box.Common(c.lines.filter((_, i) => c.roles[i] === 'proof').map((l) => l.box));
-      addFeedback(editor, near, problem, res.complete ? 'lean_complete' : 'lean_issues',
-        [...rows, res.message].join('\n'));
-      const counts = res.lines.reduce<Record<string, number>>((n, l) => ({ ...n, [l.verdict]: (n[l.verdict] ?? 0) + 1 }), {});
+      addFeedback(editor, near, problem, res.complete ? 'graph_complete' : 'graph_issues', [...rows, res.message].join('\n'));
+      const counts = res.nodes.reduce<Record<string, number>>((n, v) => {
+        const k = `${v.status} ${v.tier}`;
+        return { ...n, [k]: (n[k] ?? 0) + 1 };
+      }, {});
       api.event('check_result', c.id, { verdicts: counts, complete: res.complete, seconds: res.seconds });
-      if (res.lines.some((l) => l.verdict === 'false' || l.verdict === 'not proved')) setAsk(c.id);
+      if (res.nodes.some((v) => v.status !== 'ok')) setAsk(c.id);
       setChip(null);
       editor.selectNone();
     } catch (e) {
       setError((e as Error).message);
-      setChip((c) => c && { ...c, step: 'statement' });
+      setChip((c) => c && { ...c, step: 'graph' });
     }
   }
 
@@ -217,8 +221,8 @@ export function CheckUI() {
       {target && !chip && (
         <div className="action-bar" style={{ left: target.x + 8, top: target.y - 4 }}
           onPointerDown={(e) => e.stopPropagation()}>
-          <button className="action-btn" data-action="lean" title="Check this proof with Lean, line by line"
-            onClick={() => open(target.lines)}>Check with Lean</button>
+          <button className="action-btn" data-action="check" title="Check this proof, step by step"
+            onClick={() => open(target.lines)}>Check my proof</button>
         </div>
       )}
       {chip && (
@@ -226,7 +230,7 @@ export function CheckUI() {
         <div className="chip" ref={chipRef} style={(target?.x ?? 0) + 404 <= window.innerWidth
           ? { left: target!.x + 16, top: target!.y } : { left: Math.max(8, (target?.x ?? 200) - 120), top: (target?.y ?? 80) + 32 }}
           onPointerDown={(e) => e.stopPropagation()}>
-          {chip.step === 'readings' || chip.step === 'stating' ? (
+          {chip.step === 'readings' || chip.step === 'graphing' ? (
             <>
               {chip.lines.some((l) => status[l.key] === 'reading') && <div className="chip-note">Still reading…</div>}
               {chip.lines.map((l, i) => (
@@ -245,31 +249,42 @@ export function CheckUI() {
                   placeholder="Type the problem, e.g. the sum of two even integers is even" focus={false}
                   onChange={(v) => setChip({ ...chip, typedProblem: v })} />
               )}
-              {chip.step === 'stating' && <div className="chip-note">Stating the problem in Lean… {seconds} s</div>}
+              {chip.step === 'graphing' && <div className="chip-note">Reading your proof's steps… {seconds} s</div>}
             </>
           ) : (
             <>
-              <div className="chip-label">Lean will check that your proof shows:</div>
-              <div className="chip-read chip-words"><MathText text={chip.statement!.in_words} /></div>
-              <code className="chip-lean" title="The statement in Lean">{chip.statement!.statement}</code>
+              <div className="chip-label">Your proof shows: <MathText text={chip.graph!.goal} /></div>
+              <div className="chip-label">Its steps, each checked on its own from the steps it rests on:</div>
+              <ol className="graph">
+                {chip.graph!.nodes.map((n) => (
+                  <li key={n.id} className={`graph-node graph-${n.kind}`}>
+                    <span className="graph-id">[{n.id}]</span> <span className="graph-kind">{KIND[n.kind]}</span>{' '}
+                    <MathText text={n.text} />
+                    {n.premises.length > 0 && <span className="graph-from"> from {n.premises.map((p) => `[${p}]`).join(', ')}</span>}
+                    {chip.graph!.concludes === n.id && <span className="graph-from"> (the goal)</span>}
+                  </li>
+                ))}
+              </ol>
               {chip.step === 'checking' && (
-                <div className="chip-note">Checking {proof.length} line{proof.length > 1 ? 's' : ''} with Lean… {seconds} s</div>
+                <div className="chip-note">Checking {chip.graph!.nodes.filter((n) => n.kind !== 'given').length} steps… {seconds} s</div>
               )}
             </>
           )}
           {error && <div className="chip-error">{error}</div>}
           <div className="chip-actions">
             <button onClick={() => setChip(null)}>Cancel</button>
-            {chip.step === 'readings' || chip.step === 'stating' ? (
-              <button className="primary" disabled={busy || !problem || proof.length === 0} onClick={state}
+            {chip.step === 'readings' || chip.step === 'graphing' ? (
+              <button className="primary" disabled={busy || !problem || proof.length === 0} onClick={makeGraph}
                 title={proof.length ? '' : 'Mark at least one line as proof'}>
-                {chip.step === 'stating' ? 'Stating…' : confirmedStatements.has(problem) ? 'Check again' : 'Looks right, next'}
+                {chip.step === 'graphing' ? 'Reading…' : confirmedGraphs.has(graphKey(problem, proof)) ? 'Check again' : 'Looks right, next'}
               </button>
             ) : (
               <>
                 <button disabled={busy} onClick={() => {
-                  api.event('statement_rejected', chip.id, { problem, statement: chip.statement!.statement });
-                  setChip({ ...chip, step: 'readings', statement: null });
+                  // Compact, under /event's size limit: which steps and premises the student said were wrong.
+                  api.event('graph_rejected', chip.id, { problem, steps: chip.graph!.nodes
+                    .map((n) => `[${n.id}] ${n.kind} from ${n.premises.join(',')}: ${n.text}`).join('\n').slice(0, 3000) });
+                  setChip({ ...chip, step: 'readings', graph: null });
                 }}>
                   Not what I meant
                 </button>

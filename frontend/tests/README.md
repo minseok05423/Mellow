@@ -10,9 +10,9 @@ python3 -m venv ~/.venvs/mellow-tests
 Run, with the dev server up (`cd frontend && npm run dev`). If you script server start/stop, launch `node_modules/.bin/vite` directly: `npm run dev` leaves Vite running as an orphaned child.
 ```bash
 ~/.venvs/mellow-tests/bin/python frontend/tests/test_notebook.py /tmp/shots       # the notebook
-~/.venvs/mellow-tests/bin/python frontend/tests/test_lean.py /tmp/shots           # Check with Lean, endpoints faked
-~/.venvs/mellow-tests/bin/python frontend/tests/test_lean.py /tmp/shots --real    # the same with the real backend,
-                                                                                  # Lean and Claude (~1 min, a few cents)
+~/.venvs/mellow-tests/bin/python frontend/tests/test_check.py /tmp/shots          # Check my proof, endpoints faked
+~/.venvs/mellow-tests/bin/python frontend/tests/test_check.py /tmp/shots --real   # the same with the real backend
+                                                                                  # (a model key, or MELLOW_AGENT_QUEUE + agents)
 ```
 Each prints PASS/FAIL per check, exits non-zero on failure, and saves screenshots to the given folder.
 

@@ -10,6 +10,7 @@ def tmp_db(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DEEPSEEK_API_KEY", "")  # tests never reach a real API with the .env keys
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setattr(config, "ACCESS_CODE", "")
+    monkeypatch.setattr(config, "AGENT_QUEUE", "")  # never wait on agents
     llm.set_provider(None)
     yield
     llm.set_provider(None)

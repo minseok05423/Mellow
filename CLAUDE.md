@@ -6,11 +6,12 @@ storage/sync, the LLM rules, the stack, and the build order (P1–P6).
 Design decisions and their reasons are in [DECISIONS.md](DECISIONS.md).
 
 ## In one paragraph
-A lightweight Lean prover that lives on the tablet (DECISIONS #25, #27): a GoodNotes-style
-notebook (web/PWA, iPad + Pencil as the reference device) for university students doing
-intro proofs. Students write a problem and its proof by hand; when they select it and press
-**Check with Lean**, the LLM translates their confirmed lines into Lean and Lean 4 + Mathlib
-checks the proof line by line on a dedicated server. The notebook was stripped to this one
+A proof checker that lives on the tablet (DECISIONS #32): a GoodNotes-style notebook (web/PWA,
+iPad + Pencil as the reference device) for university students doing intro proofs. Students
+write a problem and its proof by hand; when they select it and press **Check my proof**, their
+confirmed lines become a graph of steps and premises, which they confirm, and each step is
+checked on its own: SymPy at random values (Tested), Lean 4 + Mathlib (Proved), or three
+unanimous LLM judges (Judged). Every verdict shows its tier. The notebook was stripped to this one
 feature on 2026-10-20 (SymPy checks, hints, answers, animations and widgets are gone; see
 git history before that date). The learner does the generative work; the board responds to
 their reasoning.
@@ -23,11 +24,13 @@ their reasoning.
   as production. It needs `VITE_TLDRAW_LICENSE_KEY` (hobby or trial key) there.
 
 ## NON-NEGOTIABLES (do not simplify these away, even in minimal mode)
-Validation + retry, caching, logging, machine verification (Lean checks every verdict; an
-LLM alone never judges a step: this replaced "SymPy verification" when Lean took over,
-DECISIONS #27), API keys server-side only (LLM and handwriting-recognizer vendors alike),
-and confirm-before-judge: no verdict on a reading, or a Lean statement, the student hasn't
-confirmed. Model-written Lean only ever runs sandboxed.
+Validation + retry, caching, logging, honest verification (every verdict states how it was
+checked: Proved by Lean, Tested by SymPy, or Judged by AI; a Judged ✓ needs three unanimous
+judges, and only Proved is ever called certain; DECISIONS #32 replaced "Lean checks every
+verdict"), API keys server-side only (LLM and handwriting-recognizer vendors alike), and
+confirm-before-judge: no verdict on a reading, or a proof graph, the student hasn't confirmed.
+Model-written Lean only ever runs sandboxed, and model-written math reaches SymPy only through
+the whitelist parser.
 
 ## Working style
 - Keep code simple. The user knows PyTorch and web basics, but is new to canvas
@@ -39,10 +42,12 @@ confirmed. Model-written Lean only ever runs sandboxed.
 
 ## Repo layout
 - `frontend/`: Vite + React + TypeScript + tldraw, dev server on port 5173.
-  `index.html` + `src/notebook/`: the notebook; `CheckUI.tsx` is the Lean flow.
-- `backend/`: FastAPI on port 8000, proxied as `/api` by Vite. `app/leancheck.py` checks a
-  proof with Lean (`app/lean.py` runs Lean sandboxed); `app/recognize.py` reads handwriting.
-- `backend/leaneval/`: the Lean experiments (L0, L0b), run against the app's own code.
+  `index.html` + `src/notebook/`: the notebook; `CheckUI.tsx` is the check flow.
+- `backend/`: FastAPI on port 8000, proxied as `/api` by Vite. `app/graphcheck.py` checks a
+  proof as a graph of steps (`app/lean.py` runs Lean sandboxed; `app/leancheck.py` is the
+  earlier line-by-line Lean checker, kept for the experiments); `app/recognize.py` reads handwriting.
+- `backend/leaneval/`: the experiments (L0, L0b, L0d, L1g = `graph.py`), run against the app's
+  own code; `agentq.py` lets Claude Code agents answer the model calls instead of the API.
 - `lean/`: the Lean 4 + Mathlib project. On Codespaces, run it from a copy on local disk
   (`MELLOW_LEAN_DIR`, see README).
 - `.claude/skills/`: `scene-json` and `math-verify` describe the removed SymPy/scene code;

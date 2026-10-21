@@ -116,9 +116,6 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 .chip-error { font-size: 13px; color: #c0392b; }
 .chip-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
 .chip-label select { font-size: 12px; padding: 1px 6px; }
-.chip-words { font-size: 16px; }
-.chip-lean { font: 12px ui-monospace, monospace; color: var(--dim); background: #f6f4ef; border-radius: 6px; padding: 4px 8px;
-  overflow-wrap: anywhere; }
 
 /* ---- feedback cards (page space shapes) ---- */
 .feedback {
@@ -155,6 +152,17 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 .feedback-lean_complete .feedback-icon { color: #3f8f5b; }
 .feedback-lean_issues { border-color: #c47f00; }
 .feedback-lean_issues .feedback-icon { color: #c47f00; }
+.feedback-graph_complete { border-color: #3f8f5b; }
+.feedback-graph_complete .feedback-icon { color: #3f8f5b; }
+.feedback-graph_issues { border-color: #c47f00; }
+.feedback-graph_issues .feedback-icon { color: #c47f00; }
+/* The proof's steps in the confirm box. */
+.graph { margin: 4px 0 8px; padding: 0; list-style: none; max-height: 50vh; overflow-y: auto; }
+.graph-node { padding: 3px 0; font-size: 14px; }
+.graph-given { color: var(--dim); }
+.graph-id { font: 12px ui-monospace, monospace; color: var(--dim); }
+.graph-kind { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--dim); }
+.graph-from { font-size: 12px; color: var(--dim); }
 
 /* "What will you do now?" after a ✗ or ?: optional, above the toolbar, never in the way of the ink. */
 .ask {

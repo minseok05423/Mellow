@@ -1,8 +1,9 @@
-"""Check with Lean: select lines -> confirm readings and the problem -> confirm the statement in words -> a card.
+"""Check my proof: select lines -> confirm readings and the problem -> confirm the proof's steps -> a card.
 
 Run (dev server up on :5173, see tests/README.md):
-    python tests/test_lean.py <screenshot_dir>          # Lean endpoints faked: the UI flow, fast and deterministic
-    python tests/test_lean.py <screenshot_dir> --real   # the real backend, Lean and Claude (about a minute)
+    python tests/test_check.py <screenshot_dir>          # /graph and /check faked: the UI flow, fast and deterministic
+    python tests/test_check.py <screenshot_dir> --real   # the real backend (a model key, or MELLOW_AGENT_QUEUE with
+                                                         # agents answering: see backend/leaneval/agentq.py)
 Handwriting is mouse squiggles, so readings are typed in the confirm box, as a student fixes a misread line.
 """
 import json
@@ -20,9 +21,18 @@ PROOF = [r"\text{Since } a \text{ is even, } a = 2k \text{ for some integer } k.
          r"\text{Since } b \text{ is even, } b = 2m \text{ for some integer } m.",
          r"\text{Then } a + b = 2k + 2m = 2(km).",
          r"km \text{ is an integer, so } a + b \text{ is even.}"]
-STATEMENT = {"statement": "(a b : ℤ) (ha : Even a) (hb : Even b) : Even (a + b)",
-             "in_words": "For all integers $a$ and $b$, if $a$ and $b$ are even, then $a + b$ is even."}
-VERDICTS = ["proved", "proved", "not proved", "proved"]
+GIVEN = [{"id": 0, "kind": "given", "line": None, "text": "$a$ is even", "premises": []},
+         {"id": 1, "kind": "given", "line": None, "text": "$b$ is even", "premises": []}]
+STEPS = [(0, "$a = 2k$ for some integer $k$", [0]), (1, "$b = 2m$ for some integer $m$", [1]),
+         (2, "$a + b = 2k + 2m = 2(km)$", [2, 3]), (3, "$a + b$ is even", [4])]
+GRAPH = {"goal": "the sum of two even integers is even", "goal_order": [], "concludes": 5,
+         "nodes": GIVEN + [{"id": i + 2, "kind": "claim", "line": line, "text": t, "premises": p}
+                           for i, (line, t, p) in enumerate(STEPS)],
+         "variables": [{"name": n, "kind": k, "introduced_at": at, "depends_on": []}
+                       for n, k, at in [("a", "given", None), ("b", "given", None), ("k", "obtained", 2),
+                                        ("m", "obtained", 3)]]}
+VERDICTS = [("ok", "proved", ""), ("ok", "proved", ""), ("wrong", "tested", "False as written for $k = 1, m = 1$."),
+            ("ok", "judged", "")]
 
 
 def check(cond, msg):
@@ -58,26 +68,27 @@ def write_line(page, y):
 with sync_playwright() as p:
     browser = p.chromium.launch(headless=True)
     page = browser.new_page(viewport={"width": 1280, "height": 900})
-    errors, sent, events = [], {"n_statement": 0}, []
+    errors, sent, events = [], {"n_graph": 0}, []
     page.on("pageerror", lambda e: errors.append(str(e)))
-    # A 503 from a test that fails the statement on purpose is expected; anything else is an error.
+    # A 503 from a test that fails the graph on purpose is expected; anything else is an error.
     page.on("console", lambda m: m.type == "error" and "503" not in m.text and errors.append(m.text))
     page.route("**/api/recognize", lambda r: r.fulfill(
         json={"latex": "", "confidence": None, "source": "none", "has_prose": False}))
     if not REAL:
-        def statement(route):
-            sent["statement"] = json.loads(route.request.post_data)
-            sent["n_statement"] += 1
-            if sent.get("fail_statement"):
-                return route.fulfill(status=503, json={"detail": "no key for the Lean model (claude-sonnet-5-5)"})
-            route.fulfill(json=STATEMENT)
+        def graph(route):
+            sent["graph"] = json.loads(route.request.post_data)
+            sent["n_graph"] += 1
+            if sent.get("fail_graph"):
+                return route.fulfill(status=503, json={"detail": "no key for the checking model (claude-sonnet-5-5)"})
+            route.fulfill(json=GRAPH)
 
-        def lean_check(route):
+        def graph_check(route):
             sent["check"] = json.loads(route.request.post_data)
-            route.fulfill(json={"lines": [{"verdict": v, "message": f"msg {v}", "lean": []} for v in VERDICTS],
-                                "complete": False, "message": "Look again at line 3.", "seconds": 9})
-        page.route("**/api/lean/statement", statement)
-        page.route("**/api/lean/check", lean_check)
+            route.fulfill(json={"nodes": [{"node": i + 2, "status": st, "tier": t, "message": m, "detail": ""}
+                                          for i, (st, t, m) in enumerate(VERDICTS)],
+                                "complete": False, "message": "Look again at step 4.", "seconds": 9})
+        page.route("**/api/graph", graph)
+        page.route("**/api/check", graph_check)
         page.route("**/api/event", lambda r: (events.append(json.loads(r.request.post_data)), r.fulfill(status=204)))
 
     page.goto(URL)
@@ -92,8 +103,8 @@ with sync_playwright() as p:
     stroke(page, [(100, 170), (290, 170), (290, 480), (100, 480), (100, 172)])
     page.wait_for_selector(".action-bar")
     buttons = page.locator(".action-bar button").all_inner_texts()
-    check(buttons == ["Check with Lean"], f"the only action is Check with Lean ({buttons})")
-    page.click("text=Check with Lean")
+    check(buttons == ["Check my proof"], f"the only action is Check my proof ({buttons})")
+    page.click("text=Check my proof")
     chip_x = page.locator(".chip").bounding_box()["x"]
     sel_right = js(page, "return editor.getSelectionScreenBounds().maxX")
     check(chip_x >= sel_right, f"the box sits beside the ink, not on it ({chip_x} >= {sel_right})")
@@ -106,32 +117,33 @@ with sync_playwright() as p:
     check(page.locator("text=Looks right, next").is_disabled(), "can't go on before the lines are read")
     for i, text in enumerate([PROBLEM, *PROOF]):
         inputs.nth(i).fill(text)
-    page.screenshot(path=f"{OUT}/lean_readings.png")
+    page.screenshot(path=f"{OUT}/check_readings.png")
 
-    if not REAL:  # the statement step can fail: the box says why and stays open
-        sent["fail_statement"] = True
+    if not REAL:  # the graph step can fail: the box says why and stays open
+        sent["fail_graph"] = True
         page.click("text=Looks right, next")
         page.wait_for_selector(".chip-error")
-        check("no key for the Lean model" in page.inner_text(".chip-error"), "a failed statement shows its reason")
-        sent["fail_statement"] = False
+        check("no key for the checking model" in page.inner_text(".chip-error"), "a failed graph shows its reason")
+        sent["fail_graph"] = False
 
     page.click("text=Looks right, next")
     page.wait_for_selector("text=Yes, check my proof", timeout=180_000)
-    words = page.inner_text(".chip-words")
-    check("even" in words, f"the statement is shown in words ({words})")
-    check("Even" in page.inner_text(".chip-lean"), "and in Lean")
+    steps = page.locator(".chip .graph-node").all_inner_texts()
+    check(len(steps) >= 5 and any("2k" in t for t in steps), f"the proof's steps are shown to confirm ({steps})")
     if not REAL:
-        check(sent["statement"] == {"problem": PROBLEM, "confirmed": True}, "statement request: the confirmed problem")
+        check(sent["graph"] == {"problem": PROBLEM, "lines": PROOF, "confirmed": True},
+              "graph request: the confirmed problem and proof lines")
+        check(steps[4].lower().startswith("[4] claim") and "from [2], [3]" in steps[4], f"a step shows its premises ({steps[4]})")
     readings = js(page, "return Object.values(editor.getDocumentSettings().meta.readings ?? {})"
                         ".map(r => r.confirmed)")
     check(readings and all(readings), f"every selected reading is now confirmed ({readings})")
-    page.screenshot(path=f"{OUT}/lean_statement.png")
+    page.screenshot(path=f"{OUT}/check_graph.png")
 
     # --- "Not what I meant" goes back to the readings, which are kept ---
     page.click("text=Not what I meant")
     check(page.locator(".chip .chip-read").count() == 5, "back to the five readings")
     if not REAL:
-        check([e["event"] for e in events] == ["statement_rejected"], f"the rejection is logged ({events})")
+        check([e["event"] for e in events] == ["graph_rejected"], f"the rejection is logged ({events})")
     page.click("text=Looks right, next")
     page.wait_for_selector("text=Yes, check my proof", timeout=180_000)
 
@@ -141,15 +153,19 @@ with sync_playwright() as p:
                            timeout=600_000)
     card = js(page, "return editor.getCurrentPageShapes().find(s => s.type === 'mellow-feedback').props")
     if not REAL:
-        check(sent["check"] == {"statement": STATEMENT["statement"], "lines": PROOF, "confirmed": True},
-              "check request: the statement and the four confirmed proof lines")
+        check(sent["check"] == {"graph": GRAPH, "confirmed": True}, "check request: the confirmed graph")
     msg = card["message"].split("\n")
-    check(len(msg) == 5 and card["line"] == PROBLEM, f"card: a row per proof line plus a summary ({len(msg)} rows)")
-    check(card["verdict"] == "lean_issues", f"the planted mistake keeps the proof from being complete ({card['verdict']})")
-    check(msg[2].startswith("?") and msg[0].startswith("✓"), f"line 3 is the one flagged ({msg[2][:40]})")
+    check(len(msg) >= 5 and card["line"] == PROBLEM, f"card: a row per step plus a summary ({len(msg)} rows)")
+    check(card["verdict"] == "graph_issues", f"the planted mistake keeps the proof from being complete ({card['verdict']})")
+    flagged = [r for r in msg[:-1] if not r.startswith("✓")]
+    check(any("2(km)" in r for r in flagged), f"the 2(km) step is flagged ({flagged})")
+    check(all(" · " in r for r in msg[:-1]), "every step shows its tier")
+    if not REAL:
+        check(msg[2].startswith("✗ [4]") and "Tested" in msg[2] and msg[0].startswith("✓ [2]") and "Proved by Lean" in msg[0],
+              f"rows: verdict, node id, tier ({msg[2][:60]})")
     check(page.locator(".chip").count() == 0, "the box closes")
     page.wait_for_timeout(300)
-    page.screenshot(path=f"{OUT}/lean_card.png")
+    page.screenshot(path=f"{OUT}/check_card.png")
 
     # --- after a ✗ or ?, one optional question; the check and the answer are logged ---
     page.wait_for_selector(".ask")
@@ -158,20 +174,21 @@ with sync_playwright() as p:
     if not REAL:
         page.wait_for_timeout(300)
         names = [e["event"] for e in events]
-        check(names == ["statement_rejected", "check_started", "check_result", "next_step"], f"events logged ({names})")
-        check(events[2]["data"]["verdicts"] == {"proved": 3, "not proved": 1}, f"verdict counts ({events[2]['data']})")
+        check(names == ["graph_rejected", "check_started", "check_result", "next_step"], f"events logged ({names})")
+        check(events[2]["data"]["verdicts"] == {"ok proved": 2, "wrong tested": 1, "ok judged": 1},
+              f"verdict counts ({events[2]['data']})")
         check(events[3]["data"] == {"answer": "Fix it"} and len({e["check_id"] for e in events}) == 1,
               "the answer belongs to the same check")
 
-        # --- the same proof again: readings shown, the confirmed statement reused (no second wait) ---
+        # --- the same proof again: readings shown, the confirmed graph reused (no second wait) ---
         js(page, "editor.setCurrentTool('lasso-select')")
         stroke(page, [(100, 170), (290, 170), (290, 480), (100, 480), (100, 172)])
         page.wait_for_selector(".action-bar")
-        page.click("text=Check with Lean")
+        page.click("text=Check my proof")
         check(page.locator(".chip .chip-read").count() == 5, "the readings are shown again")
         page.click("text=Check again")
         page.wait_for_function("window.editor.getCurrentPageShapes().filter(s => s.type === 'mellow-feedback').length == 2")
-        check(sent["n_statement"] == 3, f"no new statement request ({sent['n_statement']})")
+        check(sent["n_graph"] == 3, f"no new graph request ({sent['n_graph']})")
 
     # --- an old notebook's animated explanation still loads, as a plain card ---
     js(page, "editor.createShape({type: 'mellow-scene', x: 600, y: 900, props: {w: 300, h: 100, scene: '{}', "

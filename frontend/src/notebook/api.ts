@@ -37,23 +37,32 @@ export interface Reading {
   has_prose: boolean;
 }
 
-/** The problem as Lean states it, and what that says in words (from a second model that sees only the Lean). */
-export interface Statement { statement: string; in_words: string }
-
-export type LineVerdict = 'proved' | 'skipped step' | 'wrong reason' | 'false' | 'not given' | 'not proved' | 'unchecked';
-export interface LeanCheck {
-  lines: { verdict: LineVerdict; message: string; lean: string[] }[];
-  complete: boolean;
-  message: string;
-  seconds: number;
+/** The proof as a graph of steps (DECISIONS #32): the student confirms it before anything is judged. */
+export interface GraphNode {
+  id: number;
+  kind: 'given' | 'assume' | 'choose' | 'claim';
+  line: number | null; // index into the proof lines sent; null for the problem's givens
+  text: string;
+  premises: number[];
 }
+export interface Graph {
+  goal: string;
+  goal_order: { name: string; quantifier: 'forall' | 'exists' }[];
+  nodes: GraphNode[];
+  variables: { name: string; kind: 'given' | 'any' | 'chosen' | 'obtained'; introduced_at: number | null; depends_on: string[] }[];
+  concludes: number | null;
+}
+
+/** How far a verdict can be trusted: Proved by Lean, Tested by SymPy at random values, Judged by three models. */
+export type Tier = 'proved' | 'tested' | 'judged';
+export interface NodeVerdict { node: number; status: 'ok' | 'wrong' | 'unsure'; tier: Tier; message: string; detail: string }
+export interface GraphCheck { nodes: NodeVerdict[]; complete: boolean; message: string; seconds: number }
 
 export const api = {
   recognize: (body: { strokes: { t0: number; pts: number[][] }[]; image?: string; context: string[] }) =>
     post<Reading>('/recognize', body),
-  statement: (problem: string) => post<Statement>('/lean/statement', { problem, confirmed: true }),
-  leanCheck: (statement: string, lines: string[]) =>
-    post<LeanCheck>('/lean/check', { statement, lines, confirmed: true }),
+  graph: (problem: string, lines: string[]) => post<Graph>('/graph', { problem, lines, confirmed: true }),
+  check: (graph: Graph) => post<GraphCheck>('/check', { graph, confirmed: true }),
   /** What the student does around a check, for the friends test (PROJECT.md §11). Fire and forget; `keepalive`
    * lets it leave while the tab closes (sendBeacon can't send our headers). */
   event: (event: string, checkId: string, data: Record<string, unknown> = {}) => {

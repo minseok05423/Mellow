@@ -1,0 +1,260 @@
+[
+ {
+  "id": "eps_sqrt_limit_at_4",
+  "kind": "heldout",
+  "problem_text": "Prove using the $\\varepsilon$-$\\delta$ definition that $\\lim_{x \\to 4} \\sqrt{x} = 2$.",
+  "correct": [
+   "Let $\\varepsilon > 0$ and choose $\\delta = \\min(4, 2\\varepsilon)$.",
+   "Suppose $0 < |x - 4| < \\delta$. Since $\\delta \\le 4$, we get $x > 0$, so $\\sqrt{x}$ is defined and $\\sqrt{x} + 2 > 2$.",
+   "Multiplying top and bottom by $\\sqrt{x} + 2$, $|\\sqrt{x} - 2| = \\frac{|x - 4|}{\\sqrt{x} + 2}$.",
+   "So $|\\sqrt{x} - 2| < \\frac{|x - 4|}{2} < \\frac{\\delta}{2} \\le \\varepsilon$.",
+   "Hence $\\lim_{x \\to 4} \\sqrt{x} = 2$."
+  ],
+  "wrong": [
+   "Let $\\varepsilon > 0$.",
+   "For $x > 0$, $|\\sqrt{x} - 2| = \\frac{|x - 4|}{\\sqrt{x} + 2}$.",
+   "Choose $\\delta = \\varepsilon(\\sqrt{x} + 2)$.",
+   "Then if $0 < |x - 4| < \\delta$, we get $|\\sqrt{x} - 2| < \\frac{\\delta}{\\sqrt{x} + 2} = \\varepsilon$.",
+   "Hence $\\lim_{x \\to 4} \\sqrt{x} = 2$."
+  ],
+  "wrong_line": 2,
+  "mistake": "delta is defined using x, but delta has to be chosen from epsilon alone before x is taken."
+ },
+ {
+  "id": "eps_cube_limit_at_1",
+  "kind": "heldout",
+  "problem_text": "Prove using the $\\varepsilon$-$\\delta$ definition that $\\lim_{x \\to 1} x^3 = 1$.",
+  "correct": [
+   "Let $\\varepsilon > 0$ and let $\\delta = \\min(1, \\varepsilon/7)$.",
+   "Suppose $0 < |x - 1| < \\delta$. Then $|x - 1| < 1$, so $0 < x < 2$.",
+   "We have $x^3 - 1 = (x - 1)(x^2 + x + 1)$.",
+   "Since $0 < x < 2$, $0 < x^2 + x + 1 < 4 + 2 + 1 = 7$.",
+   "So $|x^3 - 1| = |x - 1|(x^2 + x + 1) < 7|x - 1| < 7\\delta \\le \\varepsilon$.",
+   "Therefore $\\lim_{x \\to 1} x^3 = 1$."
+  ],
+  "wrong": [
+   "Let $\\varepsilon > 0$.",
+   "We have $x^3 - 1 = (x - 1)(x^2 + 1)$.",
+   "If $|x - 1| < 1$, then $0 < x < 2$, so $x^2 + 1 < 5$.",
+   "Then $|x^3 - 1| = |x - 1|(x^2 + 1) < 5|x - 1|$.",
+   "So take $\\delta = \\min(1, \\varepsilon/5)$: if $0 < |x - 1| < \\delta$, then $|x^3 - 1| < 5\\delta \\le \\varepsilon$.",
+   "Therefore $\\lim_{x \\to 1} x^3 = 1$."
+  ],
+  "wrong_line": 1,
+  "mistake": "The factorisation is wrong: x^3 - 1 = (x - 1)(x^2 + x + 1), not (x - 1)(x^2 + 1)."
+ },
+ {
+  "id": "eps_reciprocal_continuous_at_3",
+  "kind": "heldout",
+  "problem_text": "Prove using the $\\varepsilon$-$\\delta$ definition that $f(x) = \\frac{1}{x}$ is continuous at $x = 3$.",
+  "correct": [
+   "Let $\\varepsilon > 0$ and take $\\delta = \\min(\\tfrac{3}{2}, 4\\varepsilon)$.",
+   "Suppose $|x - 3| < \\delta$. Then $|x - 3| < \\tfrac{3}{2}$, so $x > \\tfrac{3}{2}$; in particular $x \\ne 0$.",
+   "$\\left|\\frac{1}{x} - \\frac{1}{3}\\right| = \\frac{|x - 3|}{3x}$.",
+   "Since $x > \\tfrac{3}{2}$, $3x > \\tfrac{9}{2}$, so $\\frac{|x - 3|}{3x} \\le \\frac{2|x - 3|}{9}$.",
+   "Hence $\\left|\\frac{1}{x} - \\frac{1}{3}\\right| \\le \\frac{2}{9}|x - 3| < \\frac{2}{9} \\cdot 4\\varepsilon = \\frac{8}{9}\\varepsilon < \\varepsilon$.",
+   "So $\\frac{1}{x}$ is continuous at 3."
+  ],
+  "wrong": [
+   "Let $\\varepsilon > 0$.",
+   "$\\left|\\frac{1}{x} - \\frac{1}{3}\\right| = \\frac{|x - 3|}{3|x|}$.",
+   "For $x$ near 3 we have $|x| > 2$, so this is less than $\\frac{|x - 3|}{6}$.",
+   "So take $\\delta = 6\\varepsilon$: if $|x - 3| < \\delta$ then $\\left|\\frac{1}{x} - \\frac{1}{3}\\right| < \\frac{\\delta}{6} = \\varepsilon$.",
+   "Hence $\\frac{1}{x}$ is continuous at 3."
+  ],
+  "wrong_line": 3,
+  "mistake": "delta = 6 epsilon does not keep x near 3 (for large epsilon it allows x near 0), so the bound |x| > 2 is not available; delta must also be capped, e.g. min(1, 6 epsilon).",
+  "accept_lines": [
+   2,
+   3
+  ]
+ },
+ {
+  "id": "sets_preimage_of_image_injective",
+  "kind": "heldout",
+  "problem_text": "Let $f: X \\to Y$ be injective and $A \\subseteq X$. Prove that $f^{-1}(f(A)) \\subseteq A$.",
+  "correct": [
+   "Let $x \\in f^{-1}(f(A))$.",
+   "Then $f(x) \\in f(A)$, so $f(x) = f(a)$ for some $a \\in A$.",
+   "Since $f$ is injective, $f(x) = f(a)$ gives $x = a$.",
+   "So $x \\in A$, and therefore $f^{-1}(f(A)) \\subseteq A$."
+  ],
+  "wrong": [
+   "Let $x \\in f^{-1}(f(A))$.",
+   "By definition of preimage, $f(x) \\in f(A)$.",
+   "By definition of the image $f(A)$, this means $x \\in A$.",
+   "So $f^{-1}(f(A)) \\subseteq A$."
+  ],
+  "wrong_line": 2,
+  "mistake": "f(x) in f(A) only gives f(x) = f(a) for some a in A, not x in A; injectivity is needed to get x = a and is never used."
+ },
+ {
+  "id": "sets_rational_function_injective",
+  "kind": "heldout",
+  "problem_text": "Let $f: \\mathbb{R} \\setminus \\{1\\} \\to \\mathbb{R}$ be given by $f(x) = \\frac{2x + 1}{x - 1}$. Prove that $f$ is injective.",
+  "correct": [
+   "Suppose $a, b \\ne 1$ and $f(a) = f(b)$, so $\\frac{2a + 1}{a - 1} = \\frac{2b + 1}{b - 1}$.",
+   "Multiplying by $(a - 1)(b - 1)$, which is nonzero, gives $(2a + 1)(b - 1) = (2b + 1)(a - 1)$.",
+   "Expanding, $(2a + 1)(b - 1) = 2ab - 2a + b - 1$ and $(2b + 1)(a - 1) = 2ab - 2b + a - 1$.",
+   "So $2ab - 2a + b - 1 = 2ab - 2b + a - 1$, which simplifies to $3b = 3a$.",
+   "Hence $a = b$, and $f$ is injective."
+  ],
+  "wrong": [
+   "Suppose $a, b \\ne 1$ and $f(a) = f(b)$, so $\\frac{2a + 1}{a - 1} = \\frac{2b + 1}{b - 1}$.",
+   "Multiplying by $(a - 1)(b - 1)$, which is nonzero, gives $(2a + 1)(b - 1) = (2b + 1)(a - 1)$.",
+   "Expanding, $(2a + 1)(b - 1) = 2ab - 2a - b - 1$ and $(2b + 1)(a - 1) = 2ab - 2b - a - 1$.",
+   "So $2ab - 2a - b - 1 = 2ab - 2b - a - 1$, which simplifies to $-a = -b$.",
+   "Hence $a = b$, and $f$ is injective."
+  ],
+  "wrong_line": 2,
+  "mistake": "Sign slip in the expansion: (2a + 1)(b - 1) = 2ab - 2a + b - 1 and (2b + 1)(a - 1) = 2ab - 2b + a - 1."
+ },
+ {
+  "id": "induction_8_divides_3_pow_2n_minus_1",
+  "kind": "heldout",
+  "problem_text": "Prove by induction that $8$ divides $3^{2n} - 1$ for every integer $n \\ge 1$.",
+  "correct": [
+   "Base case $n = 1$: $3^2 - 1 = 8$, which is divisible by 8.",
+   "Inductive step: assume $8 \\mid 3^{2n} - 1$ for some $n \\ge 1$, say $3^{2n} - 1 = 8m$ with $m$ an integer.",
+   "Then $3^{2(n+1)} - 1 = 9 \\cdot 3^{2n} - 1 = 9(3^{2n} - 1) + 8$.",
+   "$= 9 \\cdot 8m + 8 = 8(9m + 1)$, so $8 \\mid 3^{2(n+1)} - 1$.",
+   "By induction, $8 \\mid 3^{2n} - 1$ for all $n \\ge 1$."
+  ],
+  "wrong": [
+   "Base case $n = 1$: $3^2 - 1 = 8$, which is divisible by 8.",
+   "Inductive step: assume $8 \\mid 3^{2n} - 1$ for some $n \\ge 1$, say $3^{2n} - 1 = 8m$ with $m$ an integer.",
+   "Then $3^{2(n+1)} - 1 = 9 \\cdot 3^{2n} - 1 = 9(3^{2n} - 1)$.",
+   "$= 9 \\cdot 8m = 8(9m)$, so $8 \\mid 3^{2(n+1)} - 1$.",
+   "By induction, $8 \\mid 3^{2n} - 1$ for all $n \\ge 1$."
+  ],
+  "wrong_line": 2,
+  "mistake": "9 * 3^(2n) - 1 equals 9(3^(2n) - 1) + 8, not 9(3^(2n) - 1); the +8 term was dropped."
+ },
+ {
+  "id": "induction_postage_3_and_5",
+  "kind": "heldout",
+  "problem_text": "Prove that every integer $n \\ge 8$ can be written as $n = 3a + 5b$ with $a$ and $b$ non-negative integers.",
+  "correct": [
+   "Base case: $8 = 3 \\cdot 1 + 5 \\cdot 1$.",
+   "Inductive step: suppose $n \\ge 8$ and $n = 3a + 5b$ with $a, b \\ge 0$ integers.",
+   "Case $b \\ge 1$: $n + 1 = 3(a + 2) + 5(b - 1)$, with $a + 2 \\ge 0$ and $b - 1 \\ge 0$.",
+   "Case $b = 0$: then $n = 3a \\ge 8$, so $a \\ge 3$, and $n + 1 = 3(a - 3) + 5 \\cdot 2$ with $a - 3 \\ge 0$.",
+   "In both cases $n + 1$ has the required form, so by induction the claim holds for all $n \\ge 8$."
+  ],
+  "wrong": [
+   "Base case: $8 = 3 \\cdot 1 + 5 \\cdot 1$.",
+   "Inductive step: suppose $n \\ge 8$ and $n = 3a + 5b$ with $a, b \\ge 0$ integers.",
+   "Then $n + 1 = 3a + 5b + 1 = 3(a + 2) + 5(b - 1)$.",
+   "So $n + 1 = 3a' + 5b'$ with $a' = a + 2$ and $b' = b - 1$ non-negative integers.",
+   "By induction, every $n \\ge 8$ can be written as $3a + 5b$."
+  ],
+  "wrong_line": 3,
+  "mistake": "b' = b - 1 is negative when b = 0, so the case b = 0 (e.g. n = 9) is not covered."
+ },
+ {
+  "id": "induction_2_pow_n_beats_n_squared",
+  "kind": "heldout",
+  "problem_text": "Prove that $2^n > n^2$ for every integer $n \\ge 5$.",
+  "correct": [
+   "Base case $n = 5$: $2^5 = 32 > 25 = 5^2$.",
+   "Inductive step: assume $2^n > n^2$ for some $n \\ge 5$.",
+   "Then $2^{n+1} = 2 \\cdot 2^n > 2n^2 = n^2 + n^2$.",
+   "Since $n \\ge 5$, $n^2 \\ge 5n = 2n + 3n > 2n + 1$.",
+   "So $2^{n+1} > n^2 + 2n + 1 = (n + 1)^2$.",
+   "By induction, $2^n > n^2$ for all $n \\ge 5$."
+  ],
+  "wrong": [
+   "Base case $n = 5$: $2^5 = 32 > 25 = 5^2$.",
+   "Inductive hypothesis: assume $2^n > n^2$ for all $n \\ge 5$.",
+   "Taking $n + 1$ in place of $n$, which is allowed since $n + 1 \\ge 5$, gives $2^{n+1} > (n + 1)^2$.",
+   "So the statement holds for $n + 1$, and by induction $2^n > n^2$ for all $n \\ge 5$."
+  ],
+  "wrong_line": 1,
+  "mistake": "The inductive hypothesis assumes the statement for all n >= 5, which is exactly what is being proved, and then uses it at n + 1."
+ },
+ {
+  "id": "nt_product_of_1_mod_4",
+  "kind": "heldout",
+  "problem_text": "Prove that if $m$ and $n$ are integers with $m \\equiv 1 \\pmod 4$ and $n \\equiv 1 \\pmod 4$, then $mn \\equiv 1 \\pmod 4$.",
+  "correct": [
+   "Since $m \\equiv 1 \\pmod 4$, $m = 4k + 1$ for some integer $k$.",
+   "Since $n \\equiv 1 \\pmod 4$, $n = 4l + 1$ for some integer $l$.",
+   "Then $mn = (4k + 1)(4l + 1) = 16kl + 4k + 4l + 1$.",
+   "$= 4(4kl + k + l) + 1$, and $4kl + k + l$ is an integer.",
+   "So $mn \\equiv 1 \\pmod 4$."
+  ],
+  "wrong": [
+   "Since $m \\equiv 1 \\pmod 4$, $m = 4k + 1$ for some integer $k$.",
+   "Since $n \\equiv 1 \\pmod 4$, $n = 4k + 1$ for some integer $k$.",
+   "Then $mn = (4k + 1)(4k + 1) = 16k^2 + 8k + 1$.",
+   "$= 4(4k^2 + 2k) + 1$, and $4k^2 + 2k$ is an integer.",
+   "So $mn \\equiv 1 \\pmod 4$."
+  ],
+  "wrong_line": 1,
+  "mistake": "The same letter k is reused for n's witness, which silently assumes m = n; n needs its own integer.",
+  "accept_lines": [
+   1,
+   2
+  ]
+ },
+ {
+  "id": "nt_n4_plus_4_composite",
+  "kind": "heldout",
+  "problem_text": "Prove that $n^4 + 4$ is not prime for any integer $n > 1$.",
+  "correct": [
+   "$n^4 + 4 = n^4 + 4n^2 + 4 - 4n^2 = (n^2 + 2)^2 - (2n)^2$.",
+   "So $n^4 + 4 = (n^2 + 2n + 2)(n^2 - 2n + 2)$.",
+   "The second factor is $n^2 - 2n + 2 = (n - 1)^2 + 1 \\ge 2$, since $n \\ge 2$ gives $(n - 1)^2 \\ge 1$.",
+   "The first factor exceeds the second by $4n > 0$, so it is also at least 2.",
+   "So $n^4 + 4$ is a product of two integers that are each at least 2, hence it is not prime."
+  ],
+  "wrong": [
+   "$n^4 + 4 = n^4 + 4n^2 + 4 - 4n^2 = (n^2 + 2)^2 - (2n)^2$.",
+   "So $n^4 + 4 = (n^2 + 2n + 2)(n^2 - 2n + 2)$.",
+   "So $n^4 + 4$ is a product of two integers, hence it is not prime."
+  ],
+  "wrong_line": 2,
+  "mistake": "Being a product of two integers does not rule out primality, since a factor could be 1 (as at n = 1); both factors must be shown to exceed 1."
+ },
+ {
+  "id": "ineq_quartic_nonnegative",
+  "kind": "heldout",
+  "problem_text": "Prove that $x^4 - 4x + 3 \\ge 0$ for every real number $x$.",
+  "correct": [
+   "Since $x = 1$ is a root, $x^4 - 4x + 3 = (x - 1)(x^3 + x^2 + x - 3)$.",
+   "$x = 1$ is also a root of the cubic, so $x^3 + x^2 + x - 3 = (x - 1)(x^2 + 2x + 3)$.",
+   "Hence $x^4 - 4x + 3 = (x - 1)^2(x^2 + 2x + 3)$.",
+   "Also $x^2 + 2x + 3 = (x + 1)^2 + 2 > 0$.",
+   "Since $(x - 1)^2 \\ge 0$, the product is $\\ge 0$, so $x^4 - 4x + 3 \\ge 0$ for all real $x$."
+  ],
+  "wrong": [
+   "Since $x = 1$ is a root, $x^4 - 4x + 3 = (x - 1)(x^3 + x^2 + x - 3)$.",
+   "$x = 1$ is also a root of the cubic, so $x^3 + x^2 + x - 3 = (x - 1)(x^2 + 2x + 1)$.",
+   "Hence $x^4 - 4x + 3 = (x - 1)^2(x + 1)^2 = \\big((x - 1)(x + 1)\\big)^2$.",
+   "A square is always $\\ge 0$, so $x^4 - 4x + 3 \\ge 0$ for all real $x$."
+  ],
+  "wrong_line": 1,
+  "mistake": "The cubic factors as (x - 1)(x^2 + 2x + 3), not (x - 1)(x^2 + 2x + 1)."
+ },
+ {
+  "id": "logic_quadratic_negative_between_roots",
+  "kind": "heldout",
+  "problem_text": "Let $x$ be a real number. Prove that if $x^2 - 5x + 6 < 0$, then $2 < x < 3$.",
+  "correct": [
+   "We prove the contrapositive: if $x \\le 2$ or $x \\ge 3$, then $x^2 - 5x + 6 \\ge 0$.",
+   "Note $x^2 - 5x + 6 = (x - 2)(x - 3)$.",
+   "If $x \\le 2$, then $x - 2 \\le 0$ and $x - 3 < 0$, so $(x - 2)(x - 3) \\ge 0$.",
+   "If $x \\ge 3$, then $x - 2 > 0$ and $x - 3 \\ge 0$, so $(x - 2)(x - 3) \\ge 0$.",
+   "So in both cases $x^2 - 5x + 6 \\ge 0$, which proves the statement."
+  ],
+  "wrong": [
+   "Note $x^2 - 5x + 6 = (x - 2)(x - 3)$.",
+   "Suppose $2 < x < 3$.",
+   "Then $x - 2 > 0$ and $x - 3 < 0$.",
+   "So $(x - 2)(x - 3) < 0$, i.e. $x^2 - 5x + 6 < 0$.",
+   "Hence if $x^2 - 5x + 6 < 0$ then $2 < x < 3$."
+  ],
+  "wrong_line": 1,
+  "mistake": "It assumes the conclusion 2 < x < 3 and proves the converse, instead of starting from x^2 - 5x + 6 < 0."
+ }
+]

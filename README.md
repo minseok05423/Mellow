@@ -1,6 +1,6 @@
 # Mellow
-A handwriting notebook that checks your proofs with Lean: write a proof by hand, select it, and Lean 4 + Mathlib
-checks it line by line. Overview: [PROJECT.md](PROJECT.md). Spec: [SPEC.md](SPEC.md). Decisions: [DECISIONS.md](DECISIONS.md).
+A handwriting notebook that checks your proofs step by step: write a proof by hand, select it, and each step is checked
+on its own, by Lean 4 + Mathlib, SymPy or three AI judges, with the verdict saying which. Overview: [PROJECT.md](PROJECT.md). Spec: [SPEC.md](SPEC.md). Decisions: [DECISIONS.md](DECISIONS.md).
 
 ## Run it
 
@@ -20,8 +20,9 @@ python3 -m venv .venv
 .venv/bin/uvicorn app.main:app --reload --port 8000
 # check: curl localhost:8000/health   or, via the frontend: curl localhost:5173/api/health
 ```
-Keys go in `backend/.env` (copy `backend/.env.example`; it's git-ignored). Lean checking needs
-`ANTHROPIC_API_KEY`. Without a reader key, handwriting readings come back empty and you type them in the
+Keys go in `backend/.env` (copy `backend/.env.example`; it's git-ignored). Checking needs
+`ANTHROPIC_API_KEY`, or `MELLOW_AGENT_QUEUE=<folder>` to have Claude Code agents answer the model calls instead
+(`backend/leaneval/agentq.py`). Without Lean set up, steps are still Tested or Judged, never Proved. Without a reader key, handwriting readings come back empty and you type them in the
 confirm box. Backend tests: `cd backend && .venv/bin/python -m pytest -q`.
 
 **Lean** (Lean 4 + Mathlib, the `lean/` project; the toolchain comes from elan). On Codespaces, Mathlib must sit on
@@ -33,8 +34,8 @@ curl localhost:8000/health         # "lean": true when the checker finds Mathlib
 ```
 Lean runs sandboxed with bwrap (`sudo apt install bubblewrap` if it's missing).
 
-**Experiments**: `backend/leaneval/` (L0: can a model prove the problems; L0b: does line-by-line checking catch
-planted mistakes) and `backend/bakeoff/` (handwriting recognizers). Each file's docstring says how to run it.
+**Experiments**: `backend/leaneval/` (L0: can a model prove the problems; L0b/L0d: does line-by-line Lean checking
+catch planted and subtle mistakes; L1g, `graph.py`: the same proofs through the graph check) and `backend/bakeoff/` (handwriting recognizers). Each file's docstring says how to run it.
 
 ### Port forwarding (Codespaces / VS Code)
 Open the **Ports** tab, forward 5173 (VS Code usually does this automatically when
@@ -71,11 +72,11 @@ about $7/month while it's stopped.
   lasso, select, hand; undo; zoom. Saves automatically in the browser. Every pen stroke also stores its raw points
   with timestamps, for handwriting recognition.
 - **Reading**: lines are read live and shown faintly under each line (*Readings on/off*).
-- **Check with Lean**: lasso a problem and its proof → **Check with Lean** → confirm or fix the readings and which
-  line is the problem → Lean states the problem, shown in plain words for you to confirm → Lean checks every line →
-  a card next to the proof: ✓ checked, ⋯ follows but a step is missing, ~ right claim but wrong reason, ✗ false
-  (with values Lean checked: "fails for k = 1, m = 1"), ? couldn't verify. Checking the same problem again reuses the
-  confirmed statement.
-- **Measuring the friends test**: the app logs a few events (`events` table: check started and result, statement
+- **Check my proof**: lasso a problem and its proof → **Check my proof** → confirm or fix the readings and which line
+  is the problem → your proof as numbered steps, each with the steps it rests on, for you to confirm → each step is
+  checked on its own → a card next to the proof: ✓, ✗ or ? per step, with how it was checked: *Proved by Lean*
+  (certain), *Tested* (SymPy at random values; a ✗ comes with values where it fails), or *Judged by AI* (✓ only when
+  three judges agree). Checking the same proof again reuses the confirmed steps (DECISIONS #32).
+- **Measuring the friends test**: the app logs a few events (`events` table: check started and result, steps
   rejected, leaving during a wait, the answer to "What will you do now?") and a Feedback button in the top bar.
 - **Tests**: backend `pytest`; frontend see `frontend/tests/README.md`.

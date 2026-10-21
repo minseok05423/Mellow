@@ -1,4 +1,4 @@
-// Feedback cards: the board's reply to "Check with Lean", drawn on the page as an ordinary shape the student can move
+// Feedback cards: the board's reply to "Check my proof", drawn on the page as an ordinary shape the student can move
 // or delete (SPEC §4 board objects). Placement is deterministic code, never the LLM.
 
 import katex from 'katex';
@@ -8,7 +8,7 @@ import { getPages } from './pages';
 const TYPE = 'mellow-feedback';
 // Cards from removed features (SymPy checks, hints, answers, explanations) keep their verdicts, so old notebooks load.
 const VERDICTS = ['verified', 'refuted', 'unverified', 'noted', 'answer', 'ai_check', 'hint', 'explain',
-  'lean_complete', 'lean_issues'] as const;
+  'lean_complete', 'lean_issues', 'graph_complete', 'graph_issues'] as const;
 export type Verdict = (typeof VERDICTS)[number];
 
 declare module '@tldraw/tlschema' {
@@ -19,10 +19,12 @@ declare module '@tldraw/tlschema' {
 export type FeedbackShape = TLShape<typeof TYPE>;
 
 const ICON: Record<Verdict, string> = { verified: '✓', refuted: '✗', unverified: '?', noted: '•', ai_check: '◇', hint: '?',
-  answer: '✦', explain: '❋', lean_complete: '✓', lean_issues: '?' };
+  answer: '✦', explain: '❋', lean_complete: '✓', lean_issues: '?',
+  graph_complete: '✓', graph_issues: '?' };
 const TITLE: Record<Verdict, string> = { verified: 'Follows', refuted: 'Counterexample', unverified: 'Question', noted: 'Noted',
   ai_check: 'Check · AI, not verified', hint: 'Hint', answer: 'Answer · AI', explain: 'Explanation · AI',
-  lean_complete: 'Checked by Lean', lean_issues: 'Lean check' };
+  lean_complete: 'Checked by Lean', lean_issues: 'Lean check', graph_complete: 'Every step checks out',
+  graph_issues: 'Step by step' };
 
 /** Renders text with $...$ math segments via KaTeX. Models also write \(...\), \[...\] and $$...$$
  * despite the prompt, so those become $...$ first. */

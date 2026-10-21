@@ -9,7 +9,7 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from . import config, lean, leancheck, llm, recognize, store
+from . import config, graphcheck, lean, llm, recognize, store
 
 app = FastAPI(title="Mellow")
 
@@ -36,7 +36,7 @@ def health():
         "ok": True,
         "recognizer": config.RECOGNIZER if recognize.recognizer_configured() else None,
         "reader_llm": config.FALLBACK_READER_MODEL if config.llm_configured(config.FALLBACK_READER_MODEL) else None,
-        "lean_llm": config.LEAN_MODEL if config.llm_configured(config.LEAN_MODEL) else None,
+        "check_llm": config.CHECK_MODEL if config.llm_configured(config.CHECK_MODEL) else None,
         "lean": lean.ready(),
     }
 
@@ -52,17 +52,15 @@ def recognize_route(req: recognize.RecognizeRequest, x_mellow_user: str | None =
         raise HTTPException(502, str(e))
 
 
-def _lean_available():
-    if not config.llm_configured(config.LEAN_MODEL):
-        raise HTTPException(503, f"no key for the Lean model ({config.LEAN_MODEL})")
-    if not lean.ready():
-        raise HTTPException(503, f"Lean isn't set up at {lean.LEAN_DIR} (see README: Lean)")
+def _llm_available():
+    if not config.llm_configured(config.CHECK_MODEL):
+        raise HTTPException(503, f"no key for the checking model ({config.CHECK_MODEL})")
 
 
 class EventRequest(BaseModel):
     # shortcut: check_id isn't on request_log, so a check's model calls are joined to its events by user and time.
     # Upgrade path: send check_id as a header and log it with every call.
-    event: Literal["check_started", "statement_rejected", "check_result", "abandoned", "next_step", "feedback"]
+    event: Literal["check_started", "graph_rejected", "check_result", "abandoned", "next_step", "feedback"]
     check_id: str = Field("", max_length=64)
     data: dict = Field(default_factory=dict)
 
@@ -76,73 +74,59 @@ def event_route(req: EventRequest, x_mellow_user: str | None = Header(None)):
     store.event(user, req.check_id, req.event, req.data)
 
 
-class StatementRequest(BaseModel):
+class GraphRequest(BaseModel):
     problem: str = Field(min_length=1, max_length=2000)
-    confirmed: Literal[True]  # confirm-before-judge: the problem's reading is the student's
+    lines: list[str] = Field(min_length=1, max_length=30)
+    confirmed: Literal[True]  # confirm-before-judge: the readings are the student's
 
 
-class StatementResponse(BaseModel):
-    statement: str
-    in_words: str
-
-
-@app.post("/lean/statement", response_model=StatementResponse)
-def statement_route(req: StatementRequest, x_mellow_user: str | None = Header(None)):
-    """The problem as a Lean statement, and what that statement says in words, for the student to confirm."""
+@app.post("/graph", response_model=graphcheck.Graph)
+def graph_route(req: GraphRequest, x_mellow_user: str | None = Header(None)):
+    """The proof as a graph of steps and premises, for the student to confirm before anything is judged."""
     user = user_id(x_mellow_user)
-    _lean_available()
+    _llm_available()
     try:
-        return leancheck.state(req.problem, user)
+        return graphcheck.make_graph(req.problem.strip(), [s.strip()[:500] for s in req.lines], user)
     except llm.QuotaExceeded as e:
         raise HTTPException(429, str(e))
     except llm.LLMError as e:
-        raise HTTPException(502, f"Couldn't state this problem in Lean: {e}")
+        raise HTTPException(502, f"Couldn't read the proof's steps: {e}")
 
 
-class LeanCheckRequest(BaseModel):
-    statement: str = Field(min_length=1, max_length=2000)
-    lines: list[str] = Field(min_length=1, max_length=30)
-    # Confirm-before-judge: the readings, and the statement (via its words), are confirmed by the student.
-    confirmed: Literal[True]
+class CheckRequest(BaseModel):
+    graph: graphcheck.Graph
+    confirmed: Literal[True]  # confirm-before-judge: the student confirmed this graph
 
 
-class LineVerdict(BaseModel):
-    verdict: Literal["proved", "skipped step", "wrong reason", "false", "not given", "not proved", "unchecked"]
-    message: str
-    lean: list[str]  # what the line became in Lean
-
-
-class LeanCheckResponse(BaseModel):
-    lines: list[LineVerdict]
+class CheckResponse(BaseModel):
+    nodes: list[graphcheck.NodeVerdict]
     complete: bool
     message: str
     seconds: int
 
 
-@app.post("/lean/check", response_model=LeanCheckResponse)
-def lean_check_route(req: LeanCheckRequest, x_mellow_user: str | None = Header(None)):
-    """Check the confirmed lines of a proof against the confirmed statement, line by line, with Lean."""
+@app.post("/check", response_model=CheckResponse)
+def check_route(req: CheckRequest, x_mellow_user: str | None = Header(None)):
+    """Check each step of the confirmed graph on its own: SymPy, then Lean, then three judges."""
     user = user_id(x_mellow_user)
-    _lean_available()
-    lines = [s.strip()[:500] for s in req.lines]
-    # The statement goes into a Lean file: the same filter as model-written Lean.
-    # A statement is binders and a type: `:=` or a new line could smuggle in a proof of its own.
-    if lean.FORBIDDEN.search(req.statement) or leancheck.SPOOF.search(req.statement) or re.search(r":=|\n", req.statement):
-        raise HTTPException(400, "the statement contains something Lean isn't allowed to run")
-    key = llm.cache_key("lean_check", {"statement": req.statement, "lines": lines, "v": leancheck.RESULT_VERSION},
-                        config.LEAN_MODEL)
+    _llm_available()
+    g = req.graph
+    if len(g.nodes) > 60 or len(g.variables) > 60 or any(len(n.text) > 500 for n in g.nodes) or len(g.goal) > 2000:
+        raise HTTPException(413, "this proof is too long to check")
+    if errs := graphcheck.graph_problems(g, None):
+        raise HTTPException(400, "; ".join(errs))
+    key = llm.cache_key("check", {"graph": g.model_dump(), "v": graphcheck.RESULT_VERSION}, config.CHECK_MODEL)
     if (hit := store.cache_get(key)) is not None:
         return hit
     t = time.time()
     try:
-        result = leancheck.check(req.statement, lines, config.LEAN_MODEL, user)
+        res = graphcheck.check(g, user)
     except llm.QuotaExceeded as e:
         raise HTTPException(429, str(e))
-    res = leancheck.summary(result)
     # Logged like LLM calls (each model call inside is logged by structured_call too): the start of the learning log.
-    store.log(user=user, endpoint="lean_check", provider="lean", model=config.LEAN_MODEL, cache_key=key,
+    store.log(user=user, endpoint="check", provider="graph", model=config.CHECK_MODEL, cache_key=key,
               request=req.model_dump(), response=res, valid=1, retries=0, cached=0,
               latency_ms=int((time.time() - t) * 1000))
-    if result["translated"]:  # a failed translation (say, a timeout) is tried again next time
+    if not any(n["detail"] == "a judge failed" for n in res["nodes"]):  # a failed call is tried again next time
         store.cache_put(key, res)
     return res

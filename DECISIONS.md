@@ -351,3 +351,23 @@ L0d went from 3 to 7 of 11 caught; (2) and (3) are unmeasured (API credit ran ou
 reason that is sufficient but not the student's argument (n³ − n = (n − 1)n(n + 1) does give 3 ∣ n³ − n, whatever the
 student said about evenness), and a true claim reached by an invalid step (2xy ≤ x² + y² is true outright): those show
 as a gap, "needs a step you didn't write", and the proof is never called complete.
+
+## 32. The proof is checked as a graph of steps, each on its own; the LLM is the main checker (reverses #25's Lean-first)
+
+The user's call (2026-10-21), after reviewing the research: Lean-first was the wrong foundation for checking student
+proofs. Translation errors compound across steps, Mathlib's definitions don't match textbooks, and Lean rejects steps a
+grader finds trivial (L0b's "?" on √2). Structured natural-language verification checks one step at a time
+(Pseudo-Formalization), which is what this does. The student's confirmed lines become a graph (`app/graphcheck.py`):
+the problem's givens, then each claim, assumption or choice, with its premises (the earlier steps it rests on), the
+variables in the order they're introduced, and the goal's quantifier order, so "δ depends on x" is visible. The student
+confirms the graph before anything is judged; it replaces confirming a Lean statement. Rules catch two mistakes without
+a model: a name reused for a new object, and a choice that depends on a variable the goal quantifies later. Every other
+step is checked alone by the cheapest method that works: Tested (SymPy evaluates its equations at random values; a
+failing value is a counterexample), Proved (its Lean statement, with only its premises as hypotheses, falls to the
+fixed automation; a failure is not a verdict), else Judged (three judges, a marking scheme, ✓ only when all three accept,
+✗ only when none does, otherwise ?). Each verdict shows its tier, and the card says only Proved is certain. This changes
+CLAUDE.md's non-negotiable "Lean checks every verdict" into "every verdict states how it was checked, and an LLM verdict
+needs three unanimous judges". The biggest risk is judges being lenient (accepting a flawed step); unanimity, the
+marking scheme and seeing one step at a time reduce it but don't remove it. Later, Lean's and SymPy's verdicts become
+training labels for our own step verifier, and the confirmed graphs train the classifier that replaces the one model
+call that makes the graph. `leancheck.py` stays for the L0 experiments.
