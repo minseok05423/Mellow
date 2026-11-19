@@ -1,85 +1,118 @@
 # Mellow
-A handwriting notebook that checks your proofs step by step: write a proof by hand, select it, and each step is checked
-on its own, by Lean 4 + Mathlib, SymPy or three AI judges, with the verdict saying which. Overview: [PROJECT.md](PROJECT.md). Spec: [SPEC.md](SPEC.md). Decisions: [DECISIONS.md](DECISIONS.md).
 
-## Run it
+Mellow is a handwriting notebook that checks proofs one step at a time. You write a proof by hand
+(iPad + Pencil is the reference device), lasso it, and press **Check my proof**. Each step comes
+back with ✓, ✗ or ?, and with how it was checked:
 
-**Frontend** (Vite + TypeScript), the only port you need to forward is **5173**:
+- **Proved**: Lean 4 + Mathlib proved the step from its premises alone. This is the only verdict
+  that is called certain.
+- **Tested**: SymPy evaluated the step at 40 random values. A ✗ comes with the values where it fails.
+- **Judged**: three LLM judges marked the step against a marking scheme. It gets ✓ only if all
+  three accept and ✗ only if all three reject; anything else is ?, and you see their comments.
+
+It's aimed at university students writing their first ε–δ and induction proofs. The idea is that
+the student does the reasoning and the notebook only responds to what they wrote: nothing is
+judged until the student has confirmed both the handwriting reading and the structure of the proof.
+
+## How a check works
+
+1. The selected lines are read only when you press the button (Mathpix by default, or MyScript;
+   a vision model re-reads lines the recognizer isn't sure about). You confirm or fix each reading.
+2. A cheap model splits the proof into numbered steps and nested blocks (cases, contradiction,
+   induction, ...), and a stronger model links each step to the earlier steps it rests on. This
+   shows up as a graph you can fix by dragging before confirming.
+3. Two mistakes are caught by rules with no model at all: reusing a name for a new object, and
+   choosing something (δ) that depends on a variable the goal quantifies later (x).
+4. Every remaining step is checked alone with the cheapest method that works: SymPy, then Lean
+   (with `plausible` looking for counterexamples in the same run), then the three judges.
+
+The details and the reasons behind them are in [DECISIONS.md](DECISIONS.md) (42 entries so far).
+[SPEC.md](SPEC.md) is the product spec and [PROJECT.md](PROJECT.md) is a single-page overview.
+
+## Running it
+
+Frontend (Vite + React + tldraw), on port 5173:
+
 ```bash
 cd frontend
 npm install
-npm run dev          # http://localhost:5173
+npm run dev
 ```
 
-**Backend** (FastAPI), runs on 8000. You do *not* need to forward it: the Vite dev
-server proxies `/api/*` → `http://localhost:8000/*`.
+Backend (FastAPI), on port 8000. Vite proxies `/api/*` to it, so 5173 is the only port you need
+to forward.
+
 ```bash
 cd backend
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
+cp .env.example .env        # then fill in the keys
 .venv/bin/uvicorn app.main:app --reload --port 8000
-# check: curl localhost:8000/health   or, via the frontend: curl localhost:5173/api/health
+curl localhost:8000/health
 ```
-Keys go in `backend/.env` (copy `backend/.env.example`; it's git-ignored). Checking needs
-`ANTHROPIC_API_KEY`, or `MELLOW_AGENT_QUEUE=<folder>` to have Claude Code agents answer the model calls instead
-(`backend/leaneval/agentq.py`). Without Lean set up, steps are still Tested or Judged, never Proved. Without a reader key, handwriting readings come back empty and you type them in the
-confirm box. Backend tests: `cd backend && .venv/bin/python -m pytest -q`.
 
-**Lean** (Lean 4 + Mathlib, the `lean/` project; the toolchain comes from elan). On Codespaces, Mathlib must sit on
-the local disk, not `/workspaces` (a check there takes over 5 minutes instead of ~5 s, DECISIONS #26):
+Every model call goes to Anthropic, so checking needs `ANTHROPIC_API_KEY`. The models are set in
+`backend/app/config.py` (Haiku splits the proof, Opus links it, Sonnet writes the Lean/SymPy
+forms and judges). Setting `MELLOW_AGENT_QUEUE=<folder>` makes Claude Code agents answer the
+model calls instead of the API (`backend/leaneval/agentq.py`). Without a recognizer key the
+readings come back empty and you type them in.
+
+Lean is optional. Without it a step can be Tested or Judged, but never Proved. The `lean/`
+folder is a Lean 4 + Mathlib project (toolchain via elan), and Lean always runs inside `bwrap`
+with no network (`sudo apt install bubblewrap`). On Codespaces, keep Mathlib on the local disk.
+From `/workspaces` a single check takes over 5 minutes instead of about 5 seconds:
+
 ```bash
-cp -a lean /tmp/mellow-lean        # again after every Codespace restart: /tmp is wiped
-# backend/.env: MELLOW_LEAN_DIR=/tmp/mellow-lean
-curl localhost:8000/health         # "lean": true when the checker finds Mathlib
+cp -a lean /tmp/mellow-lean          # redo after every Codespace restart
+# in backend/.env: MELLOW_LEAN_DIR=/tmp/mellow-lean
+curl localhost:8000/health           # "lean": true once Mathlib is found
 ```
-Lean runs sandboxed with bwrap (`sudo apt install bubblewrap` if it's missing).
 
-**Experiments**: `backend/leaneval/` (L0: can a model prove the problems; L0b/L0d: does line-by-line Lean checking
-catch planted and subtle mistakes; L1g, `graph.py`: the same proofs through the graph check) and `backend/bakeoff/` (handwriting recognizers). Each file's docstring says how to run it. Every run appends its headline to
-`backend/leaneval/results/SUMMARY.md`, one file for all results; the full report stays in the run's own folder.
+Tests: `cd backend && .venv/bin/python -m pytest -q`. For the browser tests, see
+[frontend/tests/README.md](frontend/tests/README.md).
 
-### Port forwarding (Codespaces / VS Code)
-Open the **Ports** tab, forward 5173 (VS Code usually does this automatically when
-`npm run dev` starts), and click the globe icon to open it in your browser.
+### On an iPad
 
-### Testing on an iPad (or any device other than this machine)
-tldraw treats any HTTPS address that isn't localhost as production, including the
-forwarded Codespaces URL. Get a free hobby key or a trial key at
-https://tldraw.dev/pricing, then:
-```bash
-cp frontend/.env.example frontend/.env.local   # paste the key into it
+tldraw treats any HTTPS address other than localhost as production, including a forwarded
+Codespaces URL, so it needs a license key there (a free hobby key from https://tldraw.dev/pricing
+works). Put it in `frontend/.env.local` (copy `frontend/.env.example`) and restart `npm run dev`.
+Then make port 5173 public in VS Code's Ports tab and open the URL in Safari. Share → Add to Home
+Screen gives a full-screen app.
+
+### Deploying for testers
+
+`deploy/` holds scripts for a single EC2 instance (t3.xlarge, roughly $4 a day while it runs):
+
+- `deploy/launch.sh` runs once. It starts the instance with a fixed IP and writes its id and an
+  access code to `deploy/.instance`.
+- `deploy/deploy.sh` runs after each change. It builds the frontend, copies the app and the keys
+  from `backend/.env`, sets up Lean, Mathlib, Caddy (HTTPS via sslip.io) and the service, and
+  prints the link to send: `https://<ip>.sslip.io/?key=<code>`.
+
+Requests without the access code get a 401, so a leaked URL can't spend the API budget. Set a
+monthly limit in the Anthropic console anyway. `aws ec2 stop-instances` pauses billing (about
+$7 a month for the disk and IP while stopped).
+
+## Layout
+
 ```
-Restart `npm run dev`. In VS Code's **Ports** tab, set port 5173 to *Public* if the
-iPad isn't signed in to GitHub, and open the forwarded URL in Safari. For a
-full-screen app, use Share → Add to Home Screen.
+frontend/src/notebook/   the notebook; CheckUI.tsx is the check flow, GraphEditor.tsx the graph
+backend/app/             FastAPI app: graphcheck.py (the step-by-step check), lean.py (sandboxed
+                         Lean), recognize.py (handwriting), llm.py (validated, cached model calls)
+backend/leaneval/        experiments: can a model prove the problems, does checking catch planted
+                         and subtle mistakes, the graph check on the same proofs
+backend/bakeoff/         handwriting recognizer comparison
+lean/                    the Lean 4 + Mathlib project
+deploy/                  EC2 scripts
+```
 
-### Putting it online for testers (EC2)
-Testers use the web app on their own iPad; there is no native app to install (DECISIONS #29). Scripts in `deploy/`:
-1. Log in the AWS CLI once: `aws configure` (an access key of an IAM user allowed to use EC2 and SSM).
-2. Put a tldraw key in `frontend/.env.local` (see above); the server counts as production.
-3. `deploy/launch.sh`, once: starts a t3.xlarge (16 GB, about $4/day while running) with a fixed IP and saves its
-   details and the testers' access code in `deploy/.instance` (git-ignored).
-4. `deploy/deploy.sh`, after every change: builds the frontend, copies the app and `backend/.env`'s keys to the
-   server, and sets up Lean, Mathlib, Python, HTTPS (Caddy + an sslip.io name) and the service. It prints the link
-   for testers: `https://<ip>.sslip.io/?key=<code>`. They open it in Safari, then Share → Add to Home Screen.
+Each experiment's docstring says how to run it. Runs append a line to
+`backend/leaneval/results/SUMMARY.md`.
 
-Without the code in the link, the API answers 401, so a leaked bare URL can't spend the LLM budget. Also set a monthly
-spend limit in the Anthropic console. Pause billing with
-`aws ec2 stop-instances --instance-ids <id from deploy/.instance>` (and `start-instances`); the disk and IP cost
-about $7/month while it's stopped.
+## Status
 
-## What's here
-- **Notebook**: `http://localhost:5173/`. A library of notebooks, and lined, grid or blank A4 pages. Pen, eraser,
-  lasso, select, hand; undo; zoom. Saves automatically in the browser. Every pen stroke also stores its raw points
-  with timestamps, for handwriting recognition.
-- **Images**: the **Image** button (or paste) puts a screenshot or photo on the page; it's read like a line.
-- **Reading**: nothing is read while you write; Check my proof reads the lines you selected (MyScript, then
-  Claude Haiku when MyScript's reading isn't usable).
-- **Check my proof**: lasso a problem and its proof → **Check my proof** → confirm or fix the readings and which line
-  is the problem → your proof as a graph of steps and arrows, which you can fix by dragging, then confirm → each step is
-  checked on its own → a card next to the proof: ✓, ✗ or ? per step, with how it was checked: *Proved by Lean*
-  (certain), *Tested* (SymPy at random values; a ✗ comes with values where it fails), or *Judged by AI* (✓ only when
-  three judges agree). Checking the same proof again reuses the confirmed steps (DECISIONS #32).
-- **Measuring the friends test**: the app logs a few events (`events` table: check started and result, steps
-  rejected, leaving during a wait, the answer to "What will you do now?") and a Feedback button in the top bar.
-- **Tests**: backend `pytest`; frontend see `frontend/tests/README.md`.
+This is an early prototype being tried with a few friends. There are no accounts yet. Each
+browser gets an anonymous id, and notebooks are saved in the browser through tldraw's IndexedDB
+persistence. On 2026-10-20 the
+notebook was cut down to this one feature, so the earlier animated ε–δ demos, hints and widgets
+only exist in the git history.
