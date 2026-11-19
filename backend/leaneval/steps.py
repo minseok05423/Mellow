@@ -28,7 +28,7 @@ from pathlib import Path
 
 from app import config
 from app.leancheck import check as _check
-from leaneval.run import HERE, USER, cost
+from leaneval.run import HERE, USER, cost, summarize
 
 
 def check(statement: str, lines: list[str], model: str) -> dict:
@@ -115,8 +115,7 @@ def main():
                                             indent=1, ensure_ascii=False)[:4000], "```", "</details>", ""]
             else:
                 lines += [f"- {kind}: translation failed", ""]
-    (out / "report.md").write_text("\n".join(lines) + "\n")
-    print(f"\nwrote {out / 'report.md'}")
+    summarize(out, lines)
     if args.agent_queue:
         (Path(args.agent_queue) / "DONE").touch()
 

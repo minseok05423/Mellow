@@ -1,6 +1,6 @@
 # Mellow: everything in one place
 
-This file is a single overview of the project as of 2026-10-20: what Mellow is, what has been
+This file is a single overview of the project as of 2026-10-22: what Mellow is, what has been
 built, how it works, how to run and test it, what's next, and the strategy discussions so far
 (§10). The detailed sources stay where they are: product spec in [SPEC.md](SPEC.md), design
 decisions in [DECISIONS.md](DECISIONS.md), working rules in [CLAUDE.md](CLAUDE.md), run
@@ -10,26 +10,33 @@ instructions in [README.md](README.md).
 
 ## 1. What Mellow is
 
-**A lightweight Lean prover that lives on the tablet** (DECISIONS #25, #27). A GoodNotes-style
-handwriting notebook for university students doing intro proofs, in the browser as a web app /
-PWA, with iPad + Apple Pencil as the reference device.
+**A proof checker that lives on the tablet** (DECISIONS #32). A GoodNotes-style handwriting
+notebook for university students doing intro proofs, in the browser as a web app / PWA, with
+iPad + Apple Pencil as the reference device.
 
-Students write a problem and its proof by hand. They lasso it and press **Check with Lean**:
-they confirm what was read, confirm what Lean will prove (shown in plain words), and Lean 4 +
-Mathlib checks the proof **line by line**. A card on the page says, for each line:
+Students write a problem and its proof by hand. They lasso it and press **Check my proof**: they
+confirm what was read, then confirm their proof as a **graph of numbered steps**, each with the
+earlier steps it rests on. Each step is then checked **on its own**, by the cheapest method that
+works, and the card says which:
 
-- **✓ Lean checked this step.**
-- **✓ True, but it needs a step you didn't write** (Lean checked a proof the model filled in).
-- **✗ True, but it doesn't follow from the reason you gave.**
-- **? Lean couldn't verify this line**: it may be wrong, or need more steps.
-- **– Not checked**: Lean stopped before this line.
+- **Proved by Lean** (certain): the step, with only its premises as hypotheses, falls to Lean's
+  fixed automation.
+- **Tested** (SymPy at random values): a ✗ comes with values where it fails.
+- **Judged by AI**: three judges with a marking scheme, each answering ✓, ? or ✗ (✗ only when the
+  step is entirely wrong). ✓ only when all three accept, ✗ only when all three say wrong; any ? or a
+  split gives ?, and the student decides whether that step is acceptable, with the doubting judges'
+  comments in front of them (DECISIONS #33).
+
+Two mistakes are caught by rules, with no model: a name reused for a new object, and a choice
+(δ) that depends on a variable the goal quantifies later (x).
 
 The tablet is a thin client; reading, LLM calls and Lean run on the server. On 2026-10-20 the
-notebook was stripped to this one feature (DECISIONS #27): the earlier SymPy checks, hints,
-answers, animated explanations and widgets are in git history.
+notebook was stripped to one feature (DECISIONS #27): the earlier SymPy checks, hints, answers,
+animated explanations and widgets are in git history. On 2026-10-21 that feature changed from
+"Lean checks every line" to the graph check (DECISIONS #32).
 
 **Core principle:** the student does the generative work; the board responds to *their*
-reasoning. The assistant never acts on its own, and never judges a reading, or a Lean statement,
+reasoning. The assistant never acts on its own, and never judges a reading, or a proof graph,
 the student hasn't confirmed.
 
 ### Non-negotiables
@@ -39,10 +46,12 @@ These are kept even in "minimal" mode:
 - validation + retry of every LLM output
 - caching
 - logging
-- machine verification: Lean gives every verdict; an LLM alone never judges a step
+- honest verification: every verdict says how it was checked (Proved, Tested, Judged); a Judged ✓
+  needs three unanimous judges; only Proved is ever called certain
 - API keys server-side only (LLM and handwriting vendors alike; the browser never calls a vendor)
-- confirm-before-judge: no verdict on a reading or statement the student hasn't confirmed
-- model-written Lean runs only in the sandbox
+- confirm-before-judge: no verdict on a reading or proof graph the student hasn't confirmed
+- model-written Lean runs only in the sandbox; model-written math reaches SymPy only through the
+  whitelist parser
 
 ---
 
@@ -100,6 +109,22 @@ These are kept even in "minimal" mode:
     test passes, end to end too. No native iPad app: testers open an invite link in Safari and add
     it to the home screen. `deploy/` launches one EC2 t3.xlarge with HTTPS and an access code in
     the link; it waits on AWS credentials and a tldraw key.
+17. **Honest verdicts** (2026-10-20, DECISIONS #30): a false line gets values Lean checked
+    ("fails for k = 1, m = 1"); a step the model filled is a gap (⋯), never ✓ or "complete".
+    Plus event logging and a Feedback button for the friends test.
+18. **Lean checks the reason, not just the claim** (2026-10-20, DECISIONS #31): L0d went from 3 to
+    7 of 11 subtle mistakes caught.
+19. **Claude Code agents answer the model calls** (2026-10-20, `leaneval/agentq.py`) after the API
+    credit ran out, so experiments keep running.
+20. **The graph check replaces Lean-first** (2026-10-21, DECISIONS #32): translation errors
+    compound, Mathlib's definitions don't match textbooks, and Lean rejects steps a grader finds
+    trivial. Each step is now checked alone, Tested / Proved / Judged. The L1g experiment
+    (`leaneval/graph.py`) and 12 held-out proofs (`heldout.json`) were added.
+21. **L1g run** (2026-10-22, agent-answered, §9): 22/22 mistakes caught, 0 false ✓, 18/22
+    correct proofs complete.
+22. **Judges can say ?, and the student decides** (2026-10-22, DECISIONS #33): any unsure judge
+    makes a step ?; the student reviews it with the judges' comments. L1g rerun: every false alarm
+    is now a ?, nothing missed.
 
 ---
 
@@ -113,20 +138,25 @@ These are kept even in "minimal" mode:
 - **Autosave** in the browser (IndexedDB, one store per notebook).
 - **Raw ink:** every pen stroke also stores its full-rate points with timestamps
   (`[dx, dy, pressure, dt]`) in the shape's `meta.ink`, for the handwriting recognizer.
-- **Live reading:** about 1 s after you stop writing, each new line is read and shown faintly
-  under it (*Readings on/off*). Pasted images are read too and count as one line.
+- **Reading on demand:** nothing is read while you write. Check my proof reads the selected lines
+  that have no reading yet (DECISIONS #39). Images (the **Image** button, or paste) are read too and count as one line.
 
-### Check with Lean
-1. Lasso the problem and its proof → **Check with Lean**.
+### Check my proof
+1. Lasso the problem and its proof → **Check my proof**. The selected lines are read (a few seconds).
 2. **Confirm box:** each line's reading, to confirm or fix (✎ opens a LaTeX field with a live
    preview), and whether it's *the problem* or *a proof line* (with several lines, the first starts
    as the problem). If no selected line is the problem, type it.
-3. **"Lean will check that your proof shows: …"** The problem as a Lean statement, read back in
-   plain words by a second model that sees only the Lean. *Yes, check my proof* or *Not what I
-   meant*.
-4. **The card**, next to the proof: one row per line with its verdict (§1), and a summary
-   ("Lean checked every line, and the proof is complete." / "Look again at line 3.").
-- Typical times: stating a problem ~10–20 s, a check 5–60 s (a seconds counter shows).
+3. **Your proof as a graph** (DECISIONS #40): a full-screen editor with a box per step (its id, kind, and
+   the block it sits in, like *Case 1*) and an arrow from each step to the steps that rest on it. The
+   student drags boxes around, drags from one step to another to link them, drags an arrow's end to move
+   it, and taps × to remove it, then confirms. Only the links change. Checking the same proof again
+   reuses the confirmed graph.
+4. **Review** (only when a step is ?): the whole graph again, each step with its verdict and tier;
+   under each ? the comments of the judges who didn't accept it, and *Acceptable* / *Not
+   acceptable*. Then *Put it on the page*.
+5. **The card**, next to the proof: ✓, ✗ or ? per step with its tier (§1); a ? the student
+   accepted stays a ?, marked "you accepted it". The card says only Proved is certain.
+- A seconds counter shows while it checks.
 - Old notebooks still open; old cards and animated boards show as plain cards.
 
 ---
@@ -138,17 +168,34 @@ These are kept even in "minimal" mode:
    above it as context.
 2. The **stroke recognizer** reads it first: MyScript's REST API (HMAC-signed, solver turned
    off), or Mathpix Strokes.
-3. The **LLM fallback** (default DeepSeek Flash) reads the line image when there's no reading,
+3. The **LLM fallback** (default Claude Haiku) reads the line image when there's no reading,
    confidence is below 0.8, the line has prose, or the reading looks like words spelled as single
    letters.
 4. Results are cached by strokes + reader.
 
-### Stating the problem (`POST /lean/statement`)
-- Claude Sonnet writes the Lean statement; Lean must accept it (checked with `sorry` as the
-  proof), else the error goes back for one retry.
-- Claude Haiku, given only the Lean, says what it asserts in words, for the student to confirm.
+### The graph (`POST /graph`, `backend/app/graphcheck.py`)
+- Haiku splits the confirmed lines into nodes (the givens, then each claim, assumption or choice) and
+  groups them into nested blocks: a subproof, a proof by contradiction, cases, an induction (base
+  case and inductive step), a chain (DECISIONS #37). Opus links them: each node's premises, the
+  variables in the order they're introduced, the goal's quantifier order, and whether the proof
+  reaches the goal (#35). Structural errors go back for a retry. The student confirms the result.
 
-### Checking the proof (`POST /lean/check`, `backend/app/leancheck.py`)
+### Checking the graph (`POST /check`)
+1. **Rules** (no model): a name standing for two objects where both are in scope; a step resting on
+   a step inside a block that has ended; assuming the conclusion; a choice depending on a variable
+   the goal quantifies after it. Each block's shape is checked too (each case rests on its own
+   assumption, the inductive step on its hypothesis, a chain is unbroken); a broken shape keeps
+   the proof from being complete.
+2. **Tested:** the model writes each step's equations, with its premises as substitutions; SymPy
+   evaluates them at 40 random values (at least 8 must land in the domain). A failing value is ✗.
+3. **Proved:** the model writes the step as a Lean statement with its premises as hypotheses; the
+   fixed automation must prove it. A failure isn't a verdict; the step moves on.
+4. **Judged:** three judges mark the step alone against a marking scheme, each ok / unsure / wrong;
+   ✓ only if all accept, ✗ only if all say wrong, else ? with the doubting judges' comments.
+5. Cached by graph + result version, logged; a result with a failed judge call isn't cached.
+
+### The earlier line-by-line Lean checker (`backend/app/leancheck.py`, experiments only)
+Kept for L0/L0b/L0d. It stated the problem in Lean (read back in words by Haiku), then:
 1. **Translate:** Claude Sonnet turns each confirmed line into Lean: structural tactics (intro,
    obtain, induction, use, …), the claims the line makes, and the hypotheses it cites as reasons.
    It writes no proofs; tactic lines that could prove something are rejected.
@@ -170,7 +217,7 @@ These are kept even in "minimal" mode:
 
 ### The LLM layer (`backend/app/llm.py`)
 Every LLM call goes through `structured_call`: cache → daily quota (per user: 3000 stroke
-readings, 200 LLM readings, 300 Lean model calls) → streaming call → Pydantic + semantic
+readings, 200 LLM readings, 300 Lean model calls, 600 graph-check model calls) → streaming call → Pydantic + semantic
 validation → one retry with the error → clean error. Every attempt is logged to SQLite; invalid
 output is never returned or cached; prompts are part of the cache key.
 
@@ -178,12 +225,14 @@ output is never returned or cached; prompts are part of the cache key.
 | Job | Default |
 |---|---|
 | Handwriting (strokes) | MyScript |
-| Image reader (fallback) | `deepseek-flash` |
-| Lean: statements, translation, single-claim proofs | `claude-sonnet-5-5` |
-| Lean statement read back in words | `claude-haiku-5-5` |
+| Image reader (fallback) | `claude-haiku-5-5` |
+| Graph check: graph, equations, Lean statements, judges (`CHECK_MODEL`) | `claude-sonnet-5-5` |
+| Experiments' Lean checker: statements, translation (`LEAN_MODEL`) | `claude-sonnet-5-5` |
+| Experiments' statement read back in words | `claude-haiku-5-5` |
 
-Set in `backend/.env`. DeepSeek's native API runs on servers in China: check the target
-university's policy before real students use it.
+Set in `backend/.env`. With `MELLOW_AGENT_QUEUE=<folder>`, Claude Code agents answer every model
+call instead of the API (`leaneval/agentq.py`). Every call goes to Anthropic (DECISIONS #39); a `deepseek-*` model id
+still works, but DeepSeek's native API runs on servers in China: check the target university's policy first.
 
 ### Where things are stored
 - **Notebooks:** in the browser (tldraw + IndexedDB). Readings in the document's `meta`; cards
@@ -198,7 +247,7 @@ university's policy before real students use it.
 ```
 CLAUDE.md          working rules + non-negotiables
 SPEC.md            product spec
-DECISIONS.md       28 design decisions, one paragraph each
+DECISIONS.md       33 design decisions, one paragraph each
 README.md          how to run
 PROJECT.md         this file
 
@@ -206,26 +255,30 @@ frontend/          Vite + React + TypeScript + tldraw + KaTeX
   src/notebook/
     main.tsx        hash router: library ↔ notebook
     Library.tsx     notebook list; library.ts stores the index
-    Notebook.tsx    tldraw setup, toolbar, top bar (pages, paper, readings)
+    Notebook.tsx    tldraw setup, toolbar, top bar (pages, paper, feedback)
     pages.tsx       A4 page shape, paper styles, page stack, camera limits
     ink.ts          raw stroke recorder (meta.ink)
     lasso.ts        lasso tool (75%-inside rule)
     lines.ts        groups strokes into lines
-    readings.ts     live reading, readings store
-    CheckUI.tsx     readings under lines, Check with Lean, the confirm box
+    readings.ts     reads the selected lines for a check, readings store
+    CheckUI.tsx     Check my proof, the confirm boxes
+    GraphEditor.tsx the graph editor (React Flow)
     feedback.tsx    the card shape, placement, Copy button
     api.ts          calls to the backend (/api proxy)
-  tests/            Playwright (Python): test_notebook, test_lean
+  tests/            Playwright (Python): test_notebook, test_check
 
 backend/           FastAPI + Pydantic + SQLite
   app/
-    main.py         /health, /recognize, /lean/statement, /lean/check
-    leancheck.py    stating a problem, checking a proof line by line
+    main.py         /health, /recognize, /event, /graph, /check
+    graphcheck.py   the graph check: rules, SymPy, Lean, three judges
+    leancheck.py    the earlier line-by-line Lean checker (experiments only)
     lean.py         running Lean sandboxed
     recognize.py    MyScript, Mathpix, LLM fallback, the hybrid
     llm.py          structured_call, DeepSeek + Claude providers, streaming
     config.py, store.py
-  leaneval/         L0 (run.py: prove + state 25 problems), L0b (steps.py + steps.json: planted mistakes)
+  leaneval/         L0 (run.py), L0b/L0d (steps.py + steps.json / subtle.json), L0c (alone.py),
+                    L1g (graph.py, + heldout.json), agentq.py (agents answer model calls)
+  deploy/           one EC2 box for testers (Caddy HTTPS, access code)
   bakeoff/          handwriting recognizer comparison
   tests/            pytest
 
@@ -244,10 +297,12 @@ See [README.md](README.md). In short: `npm run dev` in `frontend/`; `uvicorn app
 ```bash
 cd backend && .venv/bin/python -m pytest -q                                   # never calls real APIs or Lean
 ~/.venvs/mellow-tests/bin/python frontend/tests/test_notebook.py /tmp/shots    # with both servers up
-~/.venvs/mellow-tests/bin/python frontend/tests/test_lean.py /tmp/shots        # Lean endpoints faked
-~/.venvs/mellow-tests/bin/python frontend/tests/test_lean.py /tmp/shots --real # real Lean + Claude
-cd backend && LLM_TIMEOUT_S=120 MELLOW_LEAN_DIR=/tmp/mellow-lean .venv/bin/python -m leaneval.steps  # L0b
+~/.venvs/mellow-tests/bin/python frontend/tests/test_check.py /tmp/shots       # check endpoints faked
+~/.venvs/mellow-tests/bin/python frontend/tests/test_check.py /tmp/shots --real # real Lean + Claude
+cd backend && MELLOW_LEAN_DIR=/tmp/mellow-lean .venv/bin/python -m leaneval.graph  # L1g
 ```
+Backend tests: 81 pass (2026-10-22). They fail at collection if `MELLOW_LEAN_DIR` points at a
+missing folder, as after a Codespace restart: recopy `lean/` first.
 
 ---
 
@@ -255,11 +310,12 @@ cd backend && LLM_TIMEOUT_S=120 MELLOW_LEAN_DIR=/tmp/mellow-lean .venv/bin/pytho
 
 The full list is [DECISIONS.md](DECISIONS.md). The ones that shape the current app:
 - **#6–#11** the notebook: freeform handwriting, tldraw, hybrid reading, raw ink, the lasso.
-- **#13, #15** DeepSeek's native API, streaming (used for reading).
-- **#25** Mellow is a lightweight Lean prover on the tablet.
+- **#13, #15** DeepSeek's native API, streaming (no longer used by default, #39).
 - **#26** Mathlib lives on a local disk.
-- **#27** the notebook is stripped to Check with Lean.
-- **#28** how a line is judged.
+- **#27** the notebook is stripped to one check.
+- **#29** testers get the web app from EC2, not a native app.
+- **#32** the graph check: each step alone, Tested / Proved / Judged (replaces #25's Lean-first;
+  #28, #30, #31 now apply only to the experiments' line-by-line checker).
 
 ---
 
@@ -267,15 +323,20 @@ The full list is [DECISIONS.md](DECISIONS.md). The ones that shape the current a
 
 Where these live in code, they are marked `shortcut:`.
 
-- **Proofs by contradiction** get only the automation's local reasoning, so steps that need
-  Lean plumbing (casts between ℤ and ℝ, `Even p` as `p = r + r`) show "?": √2 is 0/6 in L0b.
-  Upgrade path: a stronger local tactic set, or single-claim proofs limited to local facts.
-- **"?" doesn't say why** the line failed (false, or a step too big for the automation).
-  Upgrade path: try to prove the line's negation to tell "false" from "couldn't verify"; show the
-  Lean goal as a hint.
+- **Lenient judges** are the graph check's biggest risk (accepting a flawed step); unanimity, the
+  marking scheme and one step at a time reduce it. L1g saw none, but only on agent answers and our
+  own 22 mistakes.
+- **Blocks are the model's reading of the structure** (#37): that the cases cover everything, that
+  the base case is P(0) and that the proof's last steps state the goal are the models' word,
+  confirmed by the student. A closed block's last step counts as shown everywhere after it, so a
+  case's result used inside the next case gets through. Upgrade path: judge the structure; Lean
+  skeletons per block.
+- **Two model calls make the graph.** Upgrade path: train a classifier on confirmed graphs.
+- **Lean's trap check is by text alone**, so `(a : ℤ) (x : ℝ) : a / 2 = x` gets through.
+  Upgrade path: ask Lean the type of each term.
 - **Lean reloads Mathlib on every run** (~5 s). Upgrade path: a warm REPL (Kimina) for ~1 s.
-- **No progress while checking**, only a seconds counter. Upgrade path: stream each line's
-  verdict as Lean reaches it.
+- **No progress while checking**, only a seconds counter. Upgrade path: stream each step's
+  verdict as it lands.
 - **Which line is the problem** is a dropdown, defaulting to the first selected line.
 - **The card is placed next to the strokes**, not the readings under them, so long typed
   readings can run under it.
@@ -307,15 +368,45 @@ Where these live in code, they are marked `shortcut:`.
 
   The planted mistakes were written by us, not by students, and translation faithfulness varies
   between runs: the two v2 runs before #28's last two rules let 1 and 2 mistakes through.
+- **L0b/L0d with all of #31** (2026-10-21, agent-answered, `results/steps-20261021-*`): L0b 11/11
+  caught (8 with a counterexample), 2 false alarms, 7/11 correct proofs fully ✓; L0d 8/11 caught,
+  3 false alarms, 7/11 correct proofs fully ✓. 0 false ✓ in both. These false alarms were part of
+  the case for #32.
+- **L1g, the graph check** (2026-10-22, agent-answered, `results/graph-20261022-094251-q-graph`;
+  the same 22 cases, L0d's 11 being 9 subtle + 2 leniency):
+
+  | | L1g (graph) | Lean line by line, all of #31 |
+  |---|---|---|
+  | Mistakes caught | **22/22**, all ✗ | 19/22 |
+  | False ✓ | 0 | 0 |
+  | Correct proofs complete | **18/22** | 14/22 |
+  | False alarms | 6 steps in 4 proofs | 5 lines |
+
+  ✓s came from Lean 88, the judges 77, SymPy 16. Of the 6 false alarms, 4 are the graph, not
+  the judges: it has no case splits (`strictmono_case`, 2), no scopes (`de_morgan_or`'s second
+  half reuses x), and it left out a premise (`eps_delta_sq`'s "|x − 1| < 1" doesn't rest on
+  δ ≤ 1). The student could fix the last one at the confirm step. The other 2 are one strict
+  judge on √2's "p² even ⇒ p even" (2 of 3 accept → ?). Caveats: agents stood in for the API
+  model, their instructions mentioned planted mistakes (which may make judges stricter), and these
+  are our own 22 cases. A `deepseek-v4-pro` run the same morning (`graph-20261022-093504`)
+  failed 26 of 44 proofs with errors, so it isn't usable.
+- **L1g with ? judges** (DECISIONS #33, 2026-10-22, `results/graph-20261022-100727-q-graph2`;
+  the graph, SymPy and Lean calls came from the cache, so only the judges changed): the same 6
+  false alarms, but now **all ?** (before: 3 ✗, 3 ?), each with the judges' comments for the student
+  to weigh. Mistakes caught 22/22, 0 false ✓, 18/22 correct proofs complete. One catch weakened:
+  `coprime_assert` went from ✗ to ?, because one of three judges said unsure while giving the same
+  counterexample (a = b = c = 2) as the two who said wrong.
 
 ### Next steps
-1. **Try it with real handwriting** on an iPad or pen device (needs the tldraw license key for
+1. **Rerun L1g with blocks** (#37, built 2026-10-22, unmeasured): do the case-split and scope
+   false alarms go away? Then the 12 held-out proofs, ideally on the real API to remove the agent
+   caveat.
+2. **Try it with real handwriting** on an iPad or pen device (needs the tldraw license key for
    the forwarded URL).
-2. **Real student mistakes:** collect 20–30 and add them to `steps.json`; rerun L0b on each
-   prompt change, several times, since translations vary.
-3. **Tell "false" from "couldn't verify"** (§8), and stream verdicts.
-4. **A warm Lean server** (Kimina) and an always-on host for user tests.
-5. **User test #1:** 3–5 students, each working one proof.
+3. **Real student mistakes:** collect 20–30 and rerun L1g on each prompt change, several times.
+4. **Deploy for testers** (`deploy/`, needs AWS credentials) and **user test #1:** 3–5 students,
+   each working one proof.
+5. Stream verdicts; a warm Lean server (Kimina).
 
 ### Future: a skill tree (logged 2026-10-20, not started)
 A skill tree of the proof techniques and concepts a student has mastered, like achievements in
@@ -328,6 +419,9 @@ devices.
 
 ### Waiting on you
 - **A tldraw license key:** for the forwarded URL and iPad tests.
+- **API credit:** still out (checked 2026-10-22). Agents work for experiments, but the app itself
+  needs credit to check anything for testers.
+- **AWS credentials** for the tester deploy.
 - **The direction questions in §10** (time, access to students, what success looks like).
 - **Open questions (SPEC §11):** commercial or not (this decides the tldraw license), sign-in
   method, backend hosting (the Lean server needs an always-on ≥16 GB machine).
@@ -519,3 +613,5 @@ alongside Lean's verdict, labelled as unverified? That would break the "an LLM n
 
 **Stopped by:** the Anthropic API credit ran out at 13:52 (today's experiments: about $6.20). Still to measure after a
 top-up: L0b and L0d with all of #31, to confirm no new false alarms on correct proofs.
+(Measured 2026-10-21 with agents answering the model calls: 2 and 3 false alarms, §9. The next
+day the check moved to the graph, DECISIONS #32.)

@@ -19,7 +19,7 @@ from typing import Literal
 from pydantic import BaseModel
 
 from app import config, llm
-from leaneval.run import HERE, USER, cost
+from leaneval.run import HERE, USER, cost, summarize
 
 SYSTEM = "You are a careful university math tutor. A student in an intro-to-proofs course shows you their proof."
 ASK = {
@@ -86,7 +86,7 @@ def main():
               "structured answer (favours the model).", "",
               "| model | wrong proofs passed (false ✓) | correct proofs rejected | mistake found at the right line "
               "| cost (USD) |", "|---|---|---|---|---|", *rows]
-    (out / "report.md").write_text("\n".join(report) + "\n")
+    summarize(out, report)
     print("\n".join(report))
 
 

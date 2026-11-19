@@ -35,7 +35,8 @@ curl localhost:8000/health         # "lean": true when the checker finds Mathlib
 Lean runs sandboxed with bwrap (`sudo apt install bubblewrap` if it's missing).
 
 **Experiments**: `backend/leaneval/` (L0: can a model prove the problems; L0b/L0d: does line-by-line Lean checking
-catch planted and subtle mistakes; L1g, `graph.py`: the same proofs through the graph check) and `backend/bakeoff/` (handwriting recognizers). Each file's docstring says how to run it.
+catch planted and subtle mistakes; L1g, `graph.py`: the same proofs through the graph check) and `backend/bakeoff/` (handwriting recognizers). Each file's docstring says how to run it. Every run appends its headline to
+`backend/leaneval/results/SUMMARY.md`, one file for all results; the full report stays in the run's own folder.
 
 ### Port forwarding (Codespaces / VS Code)
 Open the **Ports** tab, forward 5173 (VS Code usually does this automatically when
@@ -71,9 +72,11 @@ about $7/month while it's stopped.
 - **Notebook**: `http://localhost:5173/`. A library of notebooks, and lined, grid or blank A4 pages. Pen, eraser,
   lasso, select, hand; undo; zoom. Saves automatically in the browser. Every pen stroke also stores its raw points
   with timestamps, for handwriting recognition.
-- **Reading**: lines are read live and shown faintly under each line (*Readings on/off*).
+- **Images**: the **Image** button (or paste) puts a screenshot or photo on the page; it's read like a line.
+- **Reading**: nothing is read while you write; Check my proof reads the lines you selected (MyScript, then
+  Claude Haiku when MyScript's reading isn't usable).
 - **Check my proof**: lasso a problem and its proof → **Check my proof** → confirm or fix the readings and which line
-  is the problem → your proof as numbered steps, each with the steps it rests on, for you to confirm → each step is
+  is the problem → your proof as a graph of steps and arrows, which you can fix by dragging, then confirm → each step is
   checked on its own → a card next to the proof: ✓, ✗ or ? per step, with how it was checked: *Proved by Lean*
   (certain), *Tested* (SymPy at random values; a ✗ comes with values where it fails), or *Judged by AI* (✓ only when
   three judges agree). Checking the same proof again reuses the confirmed steps (DECISIONS #32).

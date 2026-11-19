@@ -5,13 +5,14 @@ from app.main import app
 
 client = TestClient(app)
 H = {"X-Mellow-User": "test-user-1"}
-GRAPH = {"goal": "$a + b$ is even", "goal_order": [], "concludes": 1,
-         "nodes": [{"id": 0, "kind": "given", "line": None, "text": "$a$, $b$ even", "premises": []},
-                   {"id": 1, "kind": "claim", "line": 0, "text": "$a + b$ is even", "premises": [0]}],
+GRAPH = {"goal": "$a + b$ is even", "goal_order": [], "reaches_goal": True,
+         "blocks": [{"id": 0, "kind": "proof", "parent": None}],
+         "nodes": [{"id": 0, "kind": "given", "line": None, "text": "$a$, $b$ even", "premises": [], "block": 0},
+                   {"id": 1, "kind": "claim", "line": 0, "text": "$a + b$ is even", "premises": [0], "block": 0}],
          "variables": [{"name": "a", "kind": "given", "introduced_at": None, "depends_on": []}]}
 BODY = {"graph": GRAPH, "confirmed": True}
-RESULT = {"nodes": [{"node": 1, "status": "ok", "tier": "judged", "message": "", "detail": "3 of 3 judges accept"}],
-          "complete": True, "message": "Every step checks out: 1 judged.", "seconds": 3}
+RESULT = {"nodes": [{"node": 1, "status": "ok", "tier": "judged", "message": "", "detail": "3 of 3 judges accept", "comments": []}],
+          "complete": True, "reaches_goal": True, "message": "Every step checks out: 1 judged.", "seconds": 3}
 
 
 def model_on(monkeypatch, result=RESULT):
@@ -69,6 +70,8 @@ def test_a_malformed_or_huge_graph_is_refused(monkeypatch):
     model_on(monkeypatch)
     forward = {**GRAPH, "nodes": [GRAPH["nodes"][0], {**GRAPH["nodes"][1], "premises": [1]}]}
     assert client.post("/check", headers=H, json={**BODY, "graph": forward}).status_code == 400
+    loop = {**GRAPH, "blocks": GRAPH["blocks"] + [{"id": 1, "kind": "let", "parent": 1}]}  # a block inside itself
+    assert client.post("/check", headers=H, json={**BODY, "graph": loop}).status_code == 400
     huge = {**GRAPH, "nodes": [GRAPH["nodes"][0], {**GRAPH["nodes"][1], "text": "x" * 501}]}
     assert client.post("/check", headers=H, json={**BODY, "graph": huge}).status_code == 413
 

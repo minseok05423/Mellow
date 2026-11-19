@@ -371,3 +371,158 @@ needs three unanimous judges". The biggest risk is judges being lenient (accepti
 marking scheme and seeing one step at a time reduce it but don't remove it. Later, Lean's and SymPy's verdicts become
 training labels for our own step verifier, and the confirmed graphs train the classifier that replaces the one model
 call that makes the graph. `leancheck.py` stays for the L0 experiments.
+
+## 33. Judges can answer ?, and a ? is the student's call
+
+The user's call (2026-10-22), after L1g: two of its false alarms were one judge wanting "p² even ⇒ p even" proved,
+where most graders accept it. A judge now answers ok, unsure or wrong, and says wrong only when the step is entirely
+wrong (false, an inference that doesn't work, an assumption that isn't allowed); a gap a strict grader would ask
+about is unsure. ✓ still needs all three to accept and ✗ needs all three to say wrong; any unsure, or a split, gives ?.
+A ? is then not left as a dead end: before the card goes on the page, the student sees the whole graph with every
+verdict and, under each ?, what the doubting judges said, and marks it Acceptable or Not acceptable. The decision is
+the student's, so it never turns into a ✓: the card keeps the ? and says "you accepted it", the proof is never called
+complete because of it, and the decisions are logged (`review` event), which shows how often students overrule a
+doubt. This trades some of the judges' strictness for the student's judgement on exactly the steps where graders
+differ, which is also where working out why is the learning. L1g's numbers predate it and need a rerun.
+
+## 34. Structure refutes before the judges: Lean's `plausible`, SymPy on inequalities, and a circular-assumption rule
+
+The user's call (2026-10-22): the graph check leaned too much on the judges, with priorities accuracy, then speed,
+then token cost. In L1g the judges made 13 of the 22 catches and Lean never refuted anything: it could only prove.
+Re-reading the run, the step statements the model writes for Lean were faithful almost everywhere, so they can carry
+refutations too, and three zero-token checks now run before any judge sees a step. (1) In the same Lean file as the
+proofs, `plausible` (in Mathlib) searches for values where every hypothesis holds and the claim fails; a find is ✗
+Tested with the values. It only works on decidable statements over types it can sample (ℤ, ℕ, not ℝ) and can't test a
+premise with ∃, which also keeps it off the one unfaithful pattern the audit found (a premise's "for some x, y" turned
+into free variables). (2) SymPy's random values now test inequalities too ("3δ ≤ ε" with δ = min(1, ε/2) fails at
+ε = 1), but only to refute: an inequality can fail in a region random values miss, so passing values never give ✓.
+(3) A rule: an assumption that states what the proof concludes, and that the conclusion rests on, is ✗ (a converse
+dressed as a proof). A refutation is worded "fails for these values, where the steps it rests on hold", because it
+is about the step as the confirmed graph links it, which matters when the graph left out a premise. Left for later,
+because they need the goal stated in Lean or a model call: the shape of cases and induction (which would also end the
+case-split and scope false alarms), and refuting statements over abstract sets and functions (a model picks
+concrete ones, Lean checks). Some mistakes only a judge can see, a true claim reached by a wrong reason.
+
+## 35. A cheap model splits the proof into steps, a strong one links them, and each step is translated alone
+
+The user's design (2026-10-22), for accuracy, then speed, then token cost. The graph used to come from one call. Now
+Haiku (`CHUNK_MODEL`) splits the confirmed lines into numbered steps, and Opus (`GRAPH_MODEL`) reads the problem, the
+lines and those steps, and writes only the links: premises, variables, the goal and its quantifier order. The split
+puts each model where its mistakes get caught: a wrong chunk shows up in the student's own words at the confirm
+step, but a missing premise looks right to its author, so the strong model makes the links. The translation call
+(`forms`, the slowest stage at 78 s and 5,200 output tokens on DeepSeek) became one call per step, run in parallel.
+The wait is now the slowest step, each step's translation is cached on its own text (an edited graph re-asks only the
+steps it changed), and a translator that sees one step can't quietly fix it from context. It gets the proof's
+variables, so a name keeps one domain. In the experiments Opus also plays the student's confirm step and revises the
+graph (`leaneval/graph.py`, `revise`), since there is no student there. A student who can edit the graph in the app
+is not built yet.
+
+## 36. The graph says how the proof reaches its goal: one step, a chain, induction, cases or contradiction (its `conclusion` is replaced by blocks, #37)
+
+The user's call (2026-10-22), after the Chunks→Links run: three correct proofs were left incomplete because no single
+step states the goal. A chain of "iff"s for an arbitrary x proves a set equality, and an induction ends with "this is
+the claim for n + 1", never with "for all n". Loosening "concludes" would have called those complete again, but also
+an induction with no base case. Instead the linking model records the structure (`conclusion`: a method and its
+steps), the student confirms it with the graph (each step is labelled "base case", "link 2 of the chain to the
+goal", ...), and rules check its shape from the links at no token cost: the inductive step rests on a hypothesis the
+base case doesn't, each case on an assumption of its own, each link of a chain on the one before, a contradiction on
+an assumption. The proof is complete only when every step is ✓ and the shape holds. That the steps say the right
+thing (the base case is P(0), the chain's ends are the goal's two sides, the cases cover everything) is still the
+model's word confirmed by the student, as with one concluding step before; the judges' rule on assumptions covers
+whether the case split and the induction hypothesis are allowed. Judging the structure itself is the upgrade.
+
+## 37. The proof is grouped into nested blocks, which give steps a scope (replaces #36's `conclusion`)
+
+The user's call (2026-10-22): a proof has structure throughout, not only where it ends. Four of L1g's six false alarms
+came from a flat graph: no case splits (`strictmono_case`) and no scopes (`de_morgan_or`'s ⊇ half reuses x). Haiku,
+which already splits the lines into steps, now also groups them into nested blocks: a subproof ("let x ∈ A … so
+x ∈ B"), a proof by contradiction, cases holding a block per case, an induction holding its base case and inductive
+step, and a chain. The student's words mark the blocks ("Case 1", "suppose, for contradiction", "base case"), so a
+wrong block shows up in their own words at the confirm step, where the blocks are headers with the steps indented
+under them; that's #35's reason for giving the split to the cheap model. Opus keeps the links and now says only
+whether the proof reaches the goal (`reaches_goal`). Code then reads three things off the blocks, at no token cost.
+(1) Scope: a step may rest on steps in its own block or the blocks around it, and on what a closed block shows (its
+last step, or each part's last step for cases and induction), but not on a step inside a block that has ended
+(✗, a rule); two introductions of a name clash only where both are in scope, so x can be reused in the next block.
+(2) Shape, from the links: an induction has a base case and an inductive step that starts with and rests on its
+hypothesis, a proof by cases has two or more cases each resting on its own assumption, a proof by contradiction rests
+on what it assumes, a chain is unbroken; #36's rules, per block. (3) The judges see the assumptions of the blocks a
+step sits in and where it sits ("inside the proof by contradiction"), instead of guessing from its premises alone.
+What blocks don't settle: that the cases cover everything, that the base case is P(0), that the last steps state the
+goal; those stay the models' word, confirmed by the student, until the structure is judged. A closed block's last step
+counts as shown everywhere after it, which lets a case's result be used inside the next case. Lean doesn't use the
+blocks yet: each step is still translated alone; building a Lean skeleton (`by_contra`, `rcases`, `induction`) from
+the blocks is the next step for formalization. Unmeasured: L1g needs a rerun.
+
+## 38. The step right after a block may rest on the assumption the block opened with (it discharges it)
+
+L1g on the advanced cases (2026-10-23) flagged the closing step of three correct proofs as out of scope: "so $T$ is
+injective" resting on "$T(u) = T(v)$" and "$u = v$", "so $p = q$" resting on "$p \neq q$" and the contradiction. That
+is a discharge, and the linker is told to record it that way (#37's scope rule and the link prompt disagreed). Now the
+step right after a block may also rest on an assumption one of its ended blocks opened with; any later step still may
+not, and an intermediate step inside the block is still out of scope. Kept narrow on purpose (accuracy first): a
+conclusion that discharges two blocks in a row (both halves of a set equality) still has the earlier one's assumption
+flagged. Replayed on every stored graph: 7 proofs lose a scope ✗; on one wrong proof (la_trivial_kernel_injective) that
+✗ sat on the planted line, so its catch now has to come from Lean or the judges. Rerun of all 34 cases: still 34/34
+caught (that one as ? by the judges), 0 false ✓, and correct proofs complete went from 22 to 28 of 34 counting the
+advanced cases' first run.
+
+## 39. Lines are read only when the student checks them, and every model call goes to Anthropic
+
+The user's call (2026-10-23). Live reading read every line about a second after the student stopped writing and showed
+it faintly underneath. Now nothing is read while the student writes: Check my proof reads the selected lines that have
+no usable reading, all at once, and the confirm box opens when they're read. Reading is needed only to judge, so
+reading on demand spends calls only on lines that get checked and keeps the page free of half-right guesses; the cost
+is a few seconds' wait before the confirm box, and a line's context is only the readings already stored above it, not
+the rest of the selection (read in parallel). The same day the DeepSeek account ran out of credit, and every line
+MyScript spelled letter by letter ("s h o w") failed with a 502, since DeepSeek Flash was the fallback reader (#15).
+The fallback reader is now Claude Haiku (`claude-haiku-5-5`), so every model call in the app goes to Anthropic; the
+DeepSeek provider stays in `llm.py` for a `deepseek-*` model id.
+
+## 40. The student fixes the graph by hand, and adds screenshots with an Image button
+
+The user's call (2026-10-23). The graph used to be a list ("[4] claim from [2], [3]") that the student could only
+accept or send back ("Not what I meant"), so a single wrong link meant asking the models again. Now, after the
+readings are confirmed, the graph opens full screen as boxes and arrows (React Flow, `GraphEditor.tsx`): the student
+drags from one step to another to link them, drags an arrow's end to move it, and taps × to remove it. Linking two
+steps always makes the later one rest on the earlier, whichever way the drag went, since premises must be earlier
+steps; a given never gets premises. Only the links are editable: the steps and blocks stay the models' (a wrong step
+is still "Not what I meant"), and each box names its block ("Case 1") instead of the list's headers. Every link the
+student changed is logged with `check_started` (the model's premises → theirs), which is the training data the
+linker's upgrade path needs (#35). The editor sits in `document.body`, outside tldraw's canvas, so tldraw's gestures
+and shortcuts (Backspace deletes the selected ink) never see it, and removing is a button because an iPad has no
+delete key. Screenshots: images on the page were already read as a line (by the fallback reader), but the only way
+to add one was pasting, which is awkward on an iPad. An **Image** button opens the photo or file picker and puts the
+image on the page selected, so Check my proof is one tap away. An image goes to the reader at up to twice its size
+on the page but at most 1568 px on its long side: Claude scales larger images down anyway, and a big PNG can pass
+the API's 5 MB image limit.
+
+## 41. A step that introduces its own variables is never Tested
+
+Found in the first real check after #39 (2026-10-23, a correct proof that √2 is irrational): "√2 = b/a with a, b ∈ ℤ"
+got ✗ Tested, "false for a = 1, b = 1". The step says such a and b exist; the translator wrote it as an equation anyway
+(its prompt says not to, for "for some" claims), and SymPy tested it as if it had to hold for every a and b. That is
+the worst kind of false alarm, from the tier students are told to trust. Now code, not the prompt, keeps such a step
+from being decided by values: when the linker records a variable introduced at the step, or its text says "for some",
+"there is" or ∃, neither SymPy nor `plausible` decides it (values that break it refute nothing, values that pass prove
+nothing); Lean may still prove it, which only happens when the statement is the ∃ it should be. It can only remove
+verdicts, so it can't add a false ✓. None of the 12 Tested ✗ in the last full run (graph-20261023-050824-q-all) is
+affected. Replayed, the √2 step goes to the judges, who answer ? (a ≠ 0, and the lowest terms the splitter had moved
+into a step of its own). Also: each box in the graph editor (#40) shows, top right, the steps it rests on.
+
+## 42. Variables keep the conditions they were chosen under, and judges reason before they decide
+
+A friend's first check (2026-10-23, a correct proof that √2 is irrational) got three false ✗, all around new
+variables. (1) "p, q ∈ ℤ, q ≠ 0, gcd(p, q) = 1, √2 = p/q", one line, was split into a choice and the claim √2 = p/q,
+and the claim was tested at random p, q (✗ at p = -1, q = 1): #41 covered only the step that introduces the
+variables. Now a claim on the same line as an introduction it rests on counts as part of it, and values never decide
+it. (2) "gcd(p, q) = 2" was refuted at p = q = 0, ignoring the q ≠ 0 the student stated, because only the linked
+steps reached the translator. Now the steps that chose or obtained a step's variables go to the translator as premises
+too (`setup`): their conditions hold wherever the variables are in scope. Not an assumption's: inside a proof by
+contradiction everything would then rest on a false premise, and the refutations there would vanish. (3) All three
+judges answered "wrong" on "q² = 2k²" with reasons that ended "so the claim is actually correct": the schema asked
+for the verdict before the reason, so they committed first and reasoned after. The reason now comes first, and the
+verdict follows from it. Replayed: the friend's proof went from five flags to two (? on "p = 2k" from p² even, and a
+correct ✗ on "gcd(p, q) = 2", where only gcd ≥ 2 follows); the user's own from five to three ?s. None of the 12
+Tested ✗ in graph-20261023-050824-q-all is skipped by (1). Unmeasured: (2) and (3) change what the translator and
+the judges see on every proof, so L1g needs a rerun.

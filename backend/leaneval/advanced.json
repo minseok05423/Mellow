@@ -1,0 +1,240 @@
+[
+ {
+  "id": "ra_cauchy_bounded",
+  "kind": "real_analysis",
+  "problem_text": "Prove that every Cauchy sequence of real numbers is bounded.",
+  "correct": [
+   "Let $(a_n)$ be a Cauchy sequence. Taking $\\varepsilon = 1$, there is $N$ such that $|a_n - a_m| < 1$ for all $n, m \\ge N$.",
+   "For $n \\ge N$, $|a_n| \\le |a_n - a_N| + |a_N| < 1 + |a_N|$.",
+   "Let $M = \\max(|a_1|, \\dots, |a_{N-1}|, 1 + |a_N|)$.",
+   "Then $|a_n| \\le M$ for every $n$, so $(a_n)$ is bounded."
+  ],
+  "wrong": [
+   "Let $(a_n)$ be a Cauchy sequence. Taking $\\varepsilon = 1$, there is $N$ such that $|a_n - a_m| < 1$ for all $n, m \\ge N$.",
+   "For $n \\ge N$, $|a_n| \\le |a_n - a_N| + |a_N| < 1 + |a_N|$.",
+   "Let $M = 1 + |a_N|$.",
+   "Then $|a_n| \\le M$ for every $n$, so $(a_n)$ is bounded."
+  ],
+  "wrong_line": 3,
+  "accept_lines": [2, 3],
+  "mistake": "the bound only covers n ≥ N; the first N - 1 terms can be larger than 1 + |a_N|."
+ },
+ {
+  "id": "ra_differentiable_continuous",
+  "kind": "real_analysis",
+  "problem_text": "Prove that if $f$ is differentiable at $a$, then $f$ is continuous at $a$.",
+  "correct": [
+   "For $x \\neq a$, $f(x) - f(a) = \\frac{f(x) - f(a)}{x - a} \\cdot (x - a)$.",
+   "As $x \\to a$, $\\frac{f(x) - f(a)}{x - a} \\to f'(a)$ and $x - a \\to 0$.",
+   "By the product rule for limits, $f(x) - f(a) \\to f'(a) \\cdot 0 = 0$.",
+   "So $\\lim_{x \\to a} f(x) = f(a)$, and $f$ is continuous at $a$."
+  ],
+  "wrong": [
+   "For $x \\neq a$, $f(x) - f(a) = \\frac{f(x) - f(a)}{x - a} \\cdot (x - a)$.",
+   "As $x \\to a$, $\\frac{f(x) - f(a)}{x - a} \\to f'(a)$ and $x - a \\to 0$.",
+   "So $f(x) - f(a) = f'(a)(x - a)$ for every $x$ near $a$, and the right side tends to $0$.",
+   "So $\\lim_{x \\to a} f(x) = f(a)$, and $f$ is continuous at $a$."
+  ],
+  "wrong_line": 2,
+  "mistake": "a limit of the difference quotient doesn't make f(x) - f(a) equal to f'(a)(x - a); that only holds for linear f."
+ },
+ {
+  "id": "ra_sup_approximation",
+  "kind": "real_analysis",
+  "problem_text": "Let $S \\subseteq \\mathbb{R}$ be nonempty and bounded above, and let $s = \\sup S$. Prove that for every $\\varepsilon > 0$ there is $x \\in S$ with $x > s - \\varepsilon$.",
+  "correct": [
+   "Let $\\varepsilon > 0$ and suppose, for contradiction, that $x \\le s - \\varepsilon$ for every $x \\in S$.",
+   "Then $s - \\varepsilon$ is an upper bound of $S$.",
+   "Since $s$ is the least upper bound, $s \\le s - \\varepsilon$, so $\\varepsilon \\le 0$.",
+   "This contradicts $\\varepsilon > 0$, so some $x \\in S$ has $x > s - \\varepsilon$."
+  ],
+  "wrong": [
+   "Let $\\varepsilon > 0$.",
+   "Since $s = \\sup S$, $s \\in S$.",
+   "Take $x = s$. Then $x \\in S$ and $x = s > s - \\varepsilon$."
+  ],
+  "wrong_line": 1,
+  "mistake": "the supremum need not belong to S (S = (0, 1) has sup 1, which isn't in S)."
+ },
+ {
+  "id": "ra_limit_n_over_n_plus_1",
+  "kind": "real_analysis",
+  "problem_text": "Prove from the definition that $\\lim_{n \\to \\infty} \\frac{n}{n + 1} = 1$.",
+  "correct": [
+   "Let $\\varepsilon > 0$ and choose an integer $N > 1/\\varepsilon$.",
+   "For $n \\ge N$, $\\left|\\frac{n}{n + 1} - 1\\right| = \\frac{1}{n + 1}$.",
+   "And $\\frac{1}{n + 1} < \\frac{1}{N} < \\varepsilon$.",
+   "So $\\frac{n}{n + 1} \\to 1$."
+  ],
+  "wrong": [
+   "Let $\\varepsilon > 0$ and choose an integer $N > \\varepsilon$.",
+   "For $n \\ge N$, $\\left|\\frac{n}{n + 1} - 1\\right| = \\frac{1}{n + 1}$.",
+   "And $\\frac{1}{n + 1} < \\frac{1}{N} < \\varepsilon$.",
+   "So $\\frac{n}{n + 1} \\to 1$."
+  ],
+  "wrong_line": 2,
+  "accept_lines": [0, 2],
+  "mistake": "N > ε doesn't give 1/N < ε (ε = 1/3, N = 1); N must exceed 1/ε."
+ },
+ {
+  "id": "ca_entire_nonpositive_real_part",
+  "kind": "complex_analysis",
+  "problem_text": "Let $f$ be an entire function with $\\operatorname{Re} f(z) \\le 0$ for all $z \\in \\mathbb{C}$. Prove that $f$ is constant.",
+  "correct": [
+   "Let $g(z) = e^{f(z)}$, which is entire.",
+   "Then $|g(z)| = e^{\\operatorname{Re} f(z)} \\le e^0 = 1$ for all $z$.",
+   "By Liouville's theorem, $g$ is constant.",
+   "So $g'(z) = f'(z) e^{f(z)} = 0$, and since $e^{f(z)} \\neq 0$, $f'(z) = 0$ for all $z$.",
+   "Hence $f$ is constant, since $\\mathbb{C}$ is connected."
+  ],
+  "wrong": [
+   "Since $\\operatorname{Re} f(z) \\le 0$ for all $z$, $f$ is bounded.",
+   "So $f$ is a bounded entire function.",
+   "By Liouville's theorem, $f$ is constant."
+  ],
+  "wrong_line": 0,
+  "accept_lines": [0, 1],
+  "mistake": "a bound on the real part doesn't bound f (f(z) = -1 + iy grows); Liouville needs |f| bounded."
+ },
+ {
+  "id": "ca_constant_modulus",
+  "kind": "complex_analysis",
+  "problem_text": "Let $f = u + iv$ be holomorphic on a connected open set $D$, with $|f|$ constant on $D$. Prove that $f$ is constant.",
+  "correct": [
+   "Let $|f|^2 = u^2 + v^2 = c$ on $D$. If $c = 0$ then $f = 0$, which is constant, so suppose $c > 0$.",
+   "Differentiating, $u u_x + v v_x = 0$ and $u u_y + v v_y = 0$.",
+   "By the Cauchy-Riemann equations, $u_y = -v_x$ and $v_y = u_x$, so $u u_x + v v_x = 0$ and $v u_x - u v_x = 0$.",
+   "This linear system in $u_x, v_x$ has determinant $-(u^2 + v^2) = -c \\neq 0$, so $u_x = v_x = 0$.",
+   "So $f' = u_x + i v_x = 0$ on $D$, and since $D$ is connected, $f$ is constant."
+  ],
+  "wrong": [
+   "Let $|f|^2 = u^2 + v^2 = c$ on $D$.",
+   "Differentiating, $u u_x + v v_x = 0$ and $u u_y + v v_y = 0$.",
+   "By the Cauchy-Riemann equations, $u_y = -v_x$ and $v_y = u_x$, so $u u_x + v v_x = 0$ and $v u_x - u v_x = 0$.",
+   "This linear system in $u_x, v_x$ has determinant $-(u^2 + v^2)$, which is never $0$, so $u_x = v_x = 0$.",
+   "So $f' = u_x + i v_x = 0$ on $D$, and since $D$ is connected, $f$ is constant."
+  ],
+  "wrong_line": 3,
+  "mistake": "u^2 + v^2 is 0 where f = 0, so the determinant can vanish; the case c = 0 needs its own argument."
+ },
+ {
+  "id": "la_eigenvectors_independent",
+  "kind": "linear_algebra",
+  "problem_text": "Let $T$ be a linear map with eigenvectors $v_1, v_2$ for eigenvalues $\\lambda_1 \\neq \\lambda_2$. Prove that $v_1, v_2$ are linearly independent.",
+  "correct": [
+   "Suppose $a v_1 + b v_2 = 0$.",
+   "Applying $T$, $a \\lambda_1 v_1 + b \\lambda_2 v_2 = 0$.",
+   "Multiplying the first equation by $\\lambda_2$ and subtracting, $a(\\lambda_2 - \\lambda_1) v_1 = 0$.",
+   "Since $\\lambda_1 \\neq \\lambda_2$ and $v_1 \\neq 0$, $a = 0$.",
+   "Then $b v_2 = 0$ and $v_2 \\neq 0$, so $b = 0$. Hence $v_1, v_2$ are linearly independent."
+  ],
+  "wrong": [
+   "Suppose $a v_1 + b v_2 = 0$.",
+   "Applying $T$, $a \\lambda_1 v_1 + b \\lambda_2 v_2 = 0$.",
+   "Since $\\lambda_1 \\neq \\lambda_2$, these two equations are different, so $a = b = 0$.",
+   "Hence $v_1, v_2$ are linearly independent."
+  ],
+  "wrong_line": 2,
+  "mistake": "two different equations don't force a = b = 0; the coefficients have to be eliminated, using v_1, v_2 ≠ 0."
+ },
+ {
+  "id": "la_trivial_kernel_injective",
+  "kind": "linear_algebra",
+  "problem_text": "Let $T: V \\to W$ be a linear map with $\\ker T = \\{0\\}$. Prove that $T$ is injective.",
+  "correct": [
+   "Suppose $T(u) = T(v)$.",
+   "Then $T(u - v) = T(u) - T(v) = 0$ by linearity.",
+   "So $u - v \\in \\ker T = \\{0\\}$, hence $u = v$.",
+   "Therefore $T$ is injective."
+  ],
+  "wrong": [
+   "Suppose $T(u) = 0$.",
+   "Since $T(0) = 0$, $T(u) = T(0)$.",
+   "So $u \\in \\ker T = \\{0\\}$, hence $u = 0$.",
+   "Therefore $T$ is injective."
+  ],
+  "wrong_line": 3,
+  "mistake": "it only shows that vectors sent to 0 are 0, which is the hypothesis; injectivity needs T(u) = T(v) ⇒ u = v."
+ },
+ {
+  "id": "la_wide_matrix_kernel",
+  "kind": "linear_algebra",
+  "problem_text": "Let $A$ be a $3 \\times 5$ real matrix. Prove that $Ax = 0$ has a nonzero solution $x \\in \\mathbb{R}^5$.",
+  "correct": [
+   "By rank-nullity, $\\operatorname{rank} A + \\dim \\ker A = 5$.",
+   "The rank of $A$ is at most its number of rows, so $\\operatorname{rank} A \\le 3$.",
+   "Hence $\\dim \\ker A \\ge 2 > 0$.",
+   "So $\\ker A$ contains a nonzero vector $x$, and $Ax = 0$."
+  ],
+  "wrong": [
+   "By rank-nullity, $\\operatorname{rank} A + \\dim \\ker A = 5$.",
+   "The rank of $A$ is at most its number of columns, so $\\operatorname{rank} A \\le 5$.",
+   "Hence $\\dim \\ker A \\ge 1$.",
+   "So $\\ker A$ contains a nonzero vector $x$, and $Ax = 0$."
+  ],
+  "wrong_line": 2,
+  "mistake": "rank ≤ 5 only gives dim ker ≥ 0 (rank 5, nullity 0); the bound by the 3 rows is what's needed."
+ },
+ {
+  "id": "top_closed_in_compact",
+  "kind": "topology",
+  "problem_text": "Prove that a closed subset $F$ of a compact topological space $X$ is compact.",
+  "correct": [
+   "Let $\\{U_i\\}$ be a cover of $F$ by open sets of $X$.",
+   "Since $F$ is closed, $X \\setminus F$ is open, so $\\{U_i\\} \\cup \\{X \\setminus F\\}$ is an open cover of $X$.",
+   "Since $X$ is compact, finitely many of these sets cover $X$: say $U_1, \\dots, U_n$ and possibly $X \\setminus F$.",
+   "Then $U_1, \\dots, U_n$ cover $F$, since $X \\setminus F$ contains no point of $F$.",
+   "So $F$ is compact."
+  ],
+  "wrong": [
+   "Since $X$ is compact, $X$ has a finite open cover $U_1, \\dots, U_n$.",
+   "Then $U_1 \\cap F, \\dots, U_n \\cap F$ is a finite open cover of $F$ in the subspace topology.",
+   "So $F$ is compact."
+  ],
+  "wrong_line": 2,
+  "accept_lines": [0, 2],
+  "mistake": "every space has a finite open cover ({X}); compactness means every open cover has a finite subcover, and closedness is never used."
+ },
+ {
+  "id": "top_preimage_closed",
+  "kind": "topology",
+  "problem_text": "Let $f: X \\to Y$ be continuous. Prove that $f^{-1}(C)$ is closed in $X$ for every closed set $C \\subseteq Y$.",
+  "correct": [
+   "Let $C \\subseteq Y$ be closed, so $Y \\setminus C$ is open.",
+   "By continuity, $f^{-1}(Y \\setminus C)$ is open in $X$.",
+   "And $f^{-1}(Y \\setminus C) = X \\setminus f^{-1}(C)$.",
+   "So $X \\setminus f^{-1}(C)$ is open, and $f^{-1}(C)$ is closed."
+  ],
+  "wrong": [
+   "Let $C \\subseteq Y$ be closed, so $Y \\setminus C$ is open.",
+   "By continuity, $f^{-1}(Y \\setminus C)$ is open in $X$.",
+   "And $f^{-1}(Y \\setminus C) = Y \\setminus f^{-1}(C)$.",
+   "So $Y \\setminus f^{-1}(C)$ is open, and $f^{-1}(C)$ is closed."
+  ],
+  "wrong_line": 2,
+  "accept_lines": [2, 3],
+  "mistake": "the complement is taken in Y instead of X: f^{-1}(C) is a subset of X, and its complement is X \\ f^{-1}(C)."
+ },
+ {
+  "id": "top_hausdorff_unique_limit",
+  "kind": "topology",
+  "problem_text": "Prove that in a Hausdorff space, a sequence has at most one limit.",
+  "correct": [
+   "Suppose $x_n \\to p$ and $x_n \\to q$ with $p \\neq q$.",
+   "Since the space is Hausdorff, there are disjoint open sets $U \\ni p$ and $V \\ni q$.",
+   "There is $N_1$ with $x_n \\in U$ for $n \\ge N_1$, and $N_2$ with $x_n \\in V$ for $n \\ge N_2$.",
+   "For $n \\ge \\max(N_1, N_2)$, $x_n \\in U \\cap V = \\emptyset$, a contradiction.",
+   "So $p = q$."
+  ],
+  "wrong": [
+   "Suppose $x_n \\to p$ and $x_n \\to q$ with $p \\neq q$.",
+   "Since the space is Hausdorff, there is an open set $U \\ni p$ with $q \\notin U$, and an open set $V \\ni q$.",
+   "There is $N_1$ with $x_n \\in U$ for $n \\ge N_1$, and $N_2$ with $x_n \\in V$ for $n \\ge N_2$.",
+   "For $n \\ge \\max(N_1, N_2)$, $x_n \\in U \\cap V = \\emptyset$, a contradiction.",
+   "So $p = q$."
+  ],
+  "wrong_line": 3,
+  "accept_lines": [1, 3],
+  "mistake": "U and V were never chosen disjoint (q ∉ U is only the T1 property), so U ∩ V = ∅ doesn't follow."
+ }
+]

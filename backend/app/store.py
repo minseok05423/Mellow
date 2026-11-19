@@ -3,6 +3,7 @@ shortcut: SQLite on local disk. Upgrade path: Postgres via SQLAlchemy with accou
 """
 import json
 import sqlite3
+import threading
 import time
 from datetime import date
 
@@ -23,11 +24,19 @@ CREATE TABLE IF NOT EXISTS usage (
 """
 
 
+_set_up: set[str] = set()
+_set_up_lock = threading.Lock()
+
+
 def connect() -> sqlite3.Connection:
     # A connection per call: FastAPI runs sync handlers on a thread pool.
     c = sqlite3.connect(config.DB_PATH, timeout=5)
-    c.execute("PRAGMA journal_mode=WAL")
-    c.executescript(SCHEMA)
+    # Once per file: threads switching a fresh file to WAL at the same time fail with "database is locked".
+    with _set_up_lock:
+        if config.DB_PATH not in _set_up:
+            c.execute("PRAGMA journal_mode=WAL")
+            c.executescript(SCHEMA)
+            _set_up.add(config.DB_PATH)
     return c
 
 

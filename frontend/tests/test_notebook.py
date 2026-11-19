@@ -49,9 +49,6 @@ with sync_playwright() as p:
     errors = []
     page.on("pageerror", lambda e: errors.append(str(e)))
     page.on("console", lambda m: m.type == "error" and errors.append(m.text))
-    # This is about the notebook itself: answer live-reading calls with "nothing read" (no backend needed).
-    page.route("**/api/recognize", lambda r: r.fulfill(
-        json={"latex": "", "confidence": None, "source": "none", "has_prose": False}))
 
     # --- library -> new notebook ---
     page.goto(URL)
@@ -118,6 +115,26 @@ with sync_playwright() as p:
     check(len(shapes(page, "mellow-page")) == 2, "eraser leaves pages alone")
     js(page, "editor.setCurrentTool('draw')")
     page.screenshot(path=f"{OUT}/p1_grid.png")
+
+    # --- a screenshot through the Image button: on the page, selected, and read when checked ---
+    page.screenshot(path=f"{OUT}/upload.png", clip={"x": 300, "y": 200, "width": 300, "height": 120})
+    reads = []
+    page.route("**/api/recognize", lambda r: (reads.append(r.request.post_data_json), r.fulfill(
+        json={"latex": "\\text{Show that } n^2 + n \\text{ is even}", "confidence": None, "source": "llm",
+              "has_prose": True})))
+    page.set_input_files(".topbar input[type=file]", f"{OUT}/upload.png")
+    page.wait_for_function("window.editor.getCurrentPageShapes().some(s => s.type === 'image')")
+    check(js(page, "return editor.getSelectedShapes().map(s => s.type)") == ["image"], "the image lands selected")
+    page.wait_for_selector(".action-bar")
+    page.click("text=Check my proof")
+    page.wait_for_selector(".chip .chip-read")
+    check(len(reads) == 1 and reads[0]["strokes"] == [] and reads[0]["image"].startswith("data:image/png"),
+          "the image is sent to the reader as an image, with no strokes")
+    check("is even" in page.inner_text(".chip .chip-read"), "its reading is in the confirm box")
+    page.screenshot(path=f"{OUT}/p1_image.png")
+    page.click(".chip >> text=Cancel")
+    js(page, "editor.deleteShapes(editor.getCurrentPageShapes().filter(s => s.type === 'image'))")
+    js(page, "editor.setCurrentTool('draw')")
 
     # --- persistence ---
     page.wait_for_timeout(800)  # tldraw persists on a short throttle

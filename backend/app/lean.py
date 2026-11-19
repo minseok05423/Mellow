@@ -33,8 +33,10 @@ FORBIDDEN = re.compile(r"\b(sorry|admit|axiom|native_decide|unsafe|implemented_b
 
 
 # The project's toolchain, called directly: elan would try to go online, which the sandbox blocks.
+# A missing LEAN_DIR (e.g. /tmp wiped by a Codespace restart) leaves ready() False instead of breaking the import.
+_TOOLCHAIN_FILE = LEAN_DIR / "lean-toolchain"
 TOOLCHAIN = Path.home() / ".elan" / "toolchains" / (
-    (LEAN_DIR / "lean-toolchain").read_text().strip().replace("/", "--").replace(":", "---"))
+    _TOOLCHAIN_FILE.read_text().strip().replace("/", "--").replace(":", "---") if _TOOLCHAIN_FILE.exists() else "missing")
 
 
 def _run(src: str) -> tuple[str, float]:

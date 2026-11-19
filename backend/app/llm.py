@@ -184,7 +184,7 @@ class QueueProvider:
             self.copies[same] += 1
         req, ans = self.folder / f"{n}.request.json", self.folder / f"{n}.answer.json"
         tmp = req.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"id": n, "copy": copy, **body}, ensure_ascii=False, indent=1))
+        tmp.write_text(json.dumps({"id": n, "copy": copy, "model": model, **body}, ensure_ascii=False, indent=1))
         tmp.rename(req)  # atomic: an agent never reads half a request
         t = time.time()
         while not ans.exists():

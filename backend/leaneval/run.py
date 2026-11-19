@@ -24,6 +24,16 @@ from bakeoff.run import PER_MTOK
 HERE = Path(__file__).resolve().parent
 USER = "lean-eval"
 
+
+def summarize(out: Path, lines: list[str]) -> None:
+    """Write the run's report.md and append its headline (all before the first ## section) to results/SUMMARY.md."""
+    (out / "report.md").write_text("\n".join(lines) + "\n")
+    head = next((i for i, x in enumerate(lines) if x.startswith("## ")), len(lines))
+    with open(HERE / "results" / "SUMMARY.md", "a") as f:
+        f.write(f"\n## {out.name}\n\n" + "\n".join("##" + x if x.startswith("# ") else x for x in lines[:head]).strip()
+                + f"\n\nFull report: {out.name}/report.md\n")
+    print(f"\nwrote {out / 'report.md'}, summary appended to {HERE / 'results' / 'SUMMARY.md'}")
+
 PROVE_SYSTEM = """You write Lean 4 proofs with Mathlib (a recent version). You are given a theorem's statement;
 write the tactic proof that comes after `:= by`.
 Return JSON with:
@@ -141,8 +151,7 @@ def main():
         p = next(q for q in problems if q["id"] == r["id"])
         lines += [f"- **{r['id']}** ({r['model']}, {'typechecks' if r['formalize']['ok'] else 'does not typecheck'})",
                   f"  - ours: `{p['lean']}`", f"  - model: `{r['formalize'].get('statement')}`"]
-    (out / "report.md").write_text("\n".join(lines) + "\n")
-    print(f"\nwrote {out / 'report.md'}")
+    summarize(out, lines)
 
 
 if __name__ == "__main__":

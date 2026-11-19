@@ -53,7 +53,7 @@ def mathpix(monkeypatch):
 
 @pytest.fixture
 def fake_llm(monkeypatch):
-    monkeypatch.setattr(config, "DEEPSEEK_API_KEY", "test")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test")  # the reader is Claude (DECISIONS #39)
     f = FakeLLM()
     llm.set_provider(f)
     return f
@@ -114,8 +114,7 @@ def test_mathpix_mixed_text_to_latex():
 
 
 def test_no_recognizer_no_llm_returns_empty_reading(monkeypatch):
-    monkeypatch.setattr(config, "RECOGNIZER", "none")
-    monkeypatch.setattr(config, "DEEPSEEK_API_KEY", "")
+    monkeypatch.setattr(config, "RECOGNIZER", "none")  # and no ANTHROPIC_API_KEY (conftest)
     assert recognize.recognize(req(image=IMAGE), "user-1").source == "none"
 
 

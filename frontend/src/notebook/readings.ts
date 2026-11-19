@@ -15,16 +15,14 @@ export interface LineReading {
 
 /** Per-line status that shouldn't be saved: in flight, or failed (with the reason). */
 export const readingStatus = atom<Record<string, 'reading' | string>>('reading status', {});
-export const showReadings = atom('show readings', true);
 
 /** Same rule as the backend's verify.looks_like_words: MyScript's math mode reads words as letters ("l e t f"). */
-export const looksLikeWords = (latex: string) =>
+const looksLikeWords = (latex: string) =>
   /[a-zA-Z]{3,}/.test(latex.replace(/\\[a-zA-Z]+|[\s{}]/g, ''));
 
-// Readings that came back letter by letter before the backend sent those lines to the LLM reader.
-// Each is re-read once per session (the retry can return the same text if no LLM is configured).
-const stale = (r: LineReading) => r.source === 'myscript' && looksLikeWords(r.latex);
-const reread = new Set<string>();
+/** A line needs reading unless the student confirmed it or it has a usable reading (not empty, not letter by letter). */
+export const needsReading = (r: LineReading | undefined) =>
+  !r || (!r.confirmed && (!r.latex || (r.source === 'myscript' && looksLikeWords(r.latex))));
 
 export function getReadings(editor: Editor): Record<string, LineReading> {
   return (editor.getDocumentSettings().meta.readings ?? {}) as unknown as Record<string, LineReading>;
@@ -53,9 +51,11 @@ async function readLine(editor: Editor, line: Line, lines: Line[]) {
   try {
     const readings = getReadings(editor);
     const context = linesAbove(lines, line).map((l) => readings[l.key]?.latex).filter(Boolean) as string[];
-    // An image is sent at twice its size on the page, so small print in a screenshot stays readable.
+    // An image is sent at up to twice its size on the page, so small print in a screenshot stays readable, but no
+    // more than 1568 px on its long side: Claude scales anything larger down, and a bigger PNG can pass its 5 MB limit.
+    const scale = line.image ? Math.min(2, 1568 / Math.max(line.box.w, line.box.h)) : 1;
     const { url: image } = await editor.toImageDataUrl(line.image ? [line.image] : line.strokes,
-      { format: 'png', background: true, padding: 16, scale: line.image ? 2 : 1 });
+      { format: 'png', background: true, padding: 16, scale });
     const r = await api.recognize({ strokes: lineStrokes(line), image, context });
     // The line may have changed while we waited; only store if it still exists.
     if (getLines(editor).some((l) => l.key === line.key)) {
@@ -68,40 +68,20 @@ async function readLine(editor: Editor, line: Line, lines: Line[]) {
 }
 
 /**
- * Live reading: shortly after the student stops writing, read every line that has no reading yet.
- * Returns a disposer.
+ * Read the selected lines that need it, all at once, when the student asks for a check: nothing is read while they
+ * write (DECISIONS #39). A failed line keeps its reason in readingStatus and is retried on the next check.
+ * shortcut: in parallel, so a line's context is only the readings already stored above it, not the selection's
+ * other lines. Upgrade path: read top to bottom if context turns out to matter more than the wait.
  */
-export function startLiveReading(editor: Editor, delayMs = 900): () => void {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-
-  const pass = () => {
-    const lines = getLines(editor);
-    const readings = getReadings(editor);
-    const status = readingStatus.get();
-    // Drop readings of lines that no longer exist (their strokes changed or were erased).
-    const live = new Set(lines.map((l) => l.key));
-    if (Object.keys(readings).some((k) => !live.has(k))) {
-      writeReadings(editor, Object.fromEntries(Object.entries(readings).filter(([k]) => live.has(k))));
-    }
-    for (const line of lines) {
-      const r = readings[line.key];
-      if (r && stale(r) && !reread.has(line.key)) reread.add(line.key);
-      else if (r || status[line.key]) continue;
-      readLine(editor, line, lines);
-    }
-  };
-
-  const stop = editor.store.listen(
-    (entry) => {
-      // Only shape changes matter (not our own readings in the document record).
-      const touchesShapes = [entry.changes.added, entry.changes.updated, entry.changes.removed]
-        .some((m) => Object.keys(m).some((id) => id.startsWith('shape:')));
-      if (!touchesShapes) return;
-      clearTimeout(timer);
-      timer = setTimeout(pass, delayMs);
-    },
-    { scope: 'document', source: 'user' },
-  );
-  timer = setTimeout(pass, delayMs); // read anything left unread from last time
-  return () => { stop(); clearTimeout(timer); };
+export async function readLines(editor: Editor, sel: Line[]) {
+  const lines = getLines(editor);
+  const readings = getReadings(editor);
+  // Drop readings of lines that no longer exist (their strokes changed or were erased).
+  const live = new Set(lines.map((l) => l.key));
+  if (Object.keys(readings).some((k) => !live.has(k))) {
+    writeReadings(editor, Object.fromEntries(Object.entries(readings).filter(([k]) => live.has(k))));
+  }
+  const busy = readingStatus.get();
+  await Promise.all(sel.filter((l) => busy[l.key] !== 'reading' && needsReading(readings[l.key]))
+    .map((l) => readLine(editor, l, lines)));
 }

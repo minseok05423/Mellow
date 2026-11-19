@@ -23,12 +23,15 @@ MATHPIX_APP_ID, MATHPIX_APP_KEY = env("MATHPIX_APP_ID"), env("MATHPIX_APP_KEY")
 MYSCRIPT_APP_KEY, MYSCRIPT_HMAC_KEY = env("MYSCRIPT_APP_KEY"), env("MYSCRIPT_HMAC_KEY")
 CONFIDENCE_MIN = float(env("CONFIDENCE_MIN", "0.8"))  # below this, the LLM fallback re-reads the line
 
-# Models. Reading: DeepSeek Flash by default (DECISIONS #15); any claude-* id works too.
-FALLBACK_READER_MODEL = env("FALLBACK_READER_MODEL", "deepseek-flash")  # must accept images
+# Models. Every call goes to Anthropic (DECISIONS #39); a deepseek-* id still works if set (#15).
+FALLBACK_READER_MODEL = env("FALLBACK_READER_MODEL", "claude-haiku-5-5")  # must accept images
 # Lean (DECISIONS #25, #27): Claude, which proved 25/25 problems in L0 where DeepSeek V4 Pro proved 1 of 4.
 LEAN_MODEL = env("LEAN_MODEL", "claude-sonnet-5-5")  # statements, translations, single-claim proofs
 LEAN_WORDS_MODEL = env("LEAN_WORDS_MODEL", "claude-haiku-5-5")  # reads a statement back in words, independently
-# The graph check (DECISIONS #32): the graph, the steps' SymPy/Lean forms, and the three judges.
+# The graph check (DECISIONS #32, #35): a cheap model splits the proof into steps, a strong one links them; the steps'
+# SymPy/Lean forms and the three judges use CHECK_MODEL.
+CHUNK_MODEL = env("CHUNK_MODEL", "claude-haiku-5-5")
+GRAPH_MODEL = env("GRAPH_MODEL", "claude-opus-5-5")
 CHECK_MODEL = env("CHECK_MODEL", "claude-sonnet-5-5")
 # When set, every model call is answered by Claude Code agents through this folder (leaneval/agentq.py), not an API.
 AGENT_QUEUE = env("MELLOW_AGENT_QUEUE")

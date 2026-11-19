@@ -78,20 +78,6 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
     repeating-linear-gradient(90deg, transparent 0 calc(var(--line) - 1px), var(--rule) calc(var(--line) - 1px) var(--line));
 }
 
-.topbar button.on { background: #e8f0fe; border-color: var(--accent); }
-
-/* ---- readings under lines (page space) ---- */
-.reading {
-  position: absolute; top: 0; left: 0; pointer-events: none; white-space: nowrap;
-  font-size: 11px; color: #8a8f98; opacity: 0.9; transform-origin: 0 0;
-  z-index: 100000; /* tldraw gives every shape (paper included) its own z-index in this layer */
-}
-.reading .katex { font-size: 1em; }
-.reading-confirmed { color: #3f8f5b; }
-.reading-unsure { color: #c47f00; }
-.reading-q { font-weight: 700; }
-.reading-busy, .reading-err { font: italic 10px system-ui, sans-serif; }
-.reading-err { color: #c0392b; }
 
 /* ---- action buttons + confirm chip (screen space) ---- */
 .action-bar { position: absolute; z-index: 400; pointer-events: all; display: flex; gap: 6px; }
@@ -128,8 +114,7 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 .feedback-copy { font-size: 11px; font-weight: 500; padding: 1px 8px; border-radius: 6px; color: var(--dim); }
 .feedback-body { display: flex; flex-direction: column; gap: 4px; cursor: text; }
 /* tldraw sets user-select: none on every element inside it, so children need it too. */
-.feedback-body, .feedback-body *, .reading-selectable, .reading-selectable * { user-select: text; -webkit-user-select: text; }
-.reading-selectable { pointer-events: all; cursor: text; }
+.feedback-body, .feedback-body * { user-select: text; -webkit-user-select: text; }
 .feedback-line { font-size: 14px; display: block; }
 .feedback-msg { white-space: pre-line; }
 .feedback-verified { border-color: #3f8f5b; }
@@ -159,10 +144,19 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 /* The proof's steps in the confirm box. */
 .graph { margin: 4px 0 8px; padding: 0; list-style: none; max-height: 50vh; overflow-y: auto; }
 .graph-node { padding: 3px 0; font-size: 14px; }
+.graph-block { padding: 6px 0 0; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--dim); }
 .graph-given { color: var(--dim); }
 .graph-id { font: 12px ui-monospace, monospace; color: var(--dim); }
 .graph-kind { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--dim); }
 .graph-from { font-size: 12px; color: var(--dim); }
+.graph-verdict { display: inline-block; width: 1.2em; font-weight: 600; }
+.verdict-ok { color: #2f7d4f; }
+.verdict-wrong { color: #b3412e; }
+.verdict-unsure { color: #a86a00; }
+.graph-msg, .judge-review { margin: 2px 0 4px 1.2em; font-size: 13px; }
+.judge-comments { margin: 0 0 4px; padding-left: 1.1em; color: #5a4a2a; }
+.decide { min-height: 44px; margin: 0 6px 0 0; padding: 0 14px; border: 1px solid #cfc9bd; border-radius: 999px; background: #fff; }
+.decide.on { border-color: #1f2a44; background: #1f2a44; color: #fff; }
 
 /* "What will you do now?" after a ✗ or ?: optional, above the toolbar, never in the way of the ink. */
 .ask {
@@ -172,3 +166,17 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 }
 .ask button { min-height: 44px; padding: 0 14px; border: 1px solid #cfc9bd; border-radius: 999px; background: #fff; }
 .ask .ask-close { border: 0; font-size: 20px; padding: 0 8px; color: var(--dim); }
+
+/* ---- graph editor (DECISIONS #40): full screen, over the notebook ---- */
+.graph-editor { position: fixed; inset: 0; z-index: 1000; display: flex; padding: 16px; background: rgba(30, 34, 40, .35); }
+.ge-panel { flex: 1; display: flex; flex-direction: column; gap: 6px; padding: 12px 16px; background: #fff;
+  border-radius: 12px; box-shadow: 0 8px 32px rgba(0, 0, 0, .2); font: 14px system-ui, sans-serif; }
+.ge-canvas { flex: 1; min-height: 240px; border: 1px solid #e3e5e8; border-radius: 8px; }
+.gnode { position: relative; width: 220px; padding: 6px 10px; background: #fff; border: 1px solid #c9ced6; border-radius: 8px; font-size: 13px; }
+.gnode.graph-given { background: #f5f6f8; }
+.gnode .react-flow__handle { width: 14px; height: 14px; background: var(--accent); } /* big enough for a finger */
+.gedge-x { position: absolute; pointer-events: all; width: 22px; height: 22px; padding: 0; border-radius: 50%;
+  border: 1px solid #c9ced6; background: #fff; color: #c0392b; font-size: 14px; line-height: 1; cursor: pointer; }
+/* The steps a box rests on, top right: the arrows' sources at a glance. */
+.gnode-deps { position: absolute; top: 4px; right: 6px; padding: 0 5px; border-radius: 8px; background: #e8f0fe;
+  color: var(--accent); font: 11px ui-monospace, monospace; }

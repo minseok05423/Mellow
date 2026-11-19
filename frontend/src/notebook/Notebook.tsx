@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   DefaultToolbar,
   DrawToolbarItem,
@@ -18,10 +18,9 @@ import 'katex/dist/katex.min.css';
 import 'katex/contrib/copy-tex'; // copying rendered math gives its LaTeX source
 import 'tldraw/tldraw.css';
 import { api } from './api';
-import { CheckUI, ReadingsOverlay } from './CheckUI';
+import { CheckUI } from './CheckUI';
 import { FeedbackShapeUtil, LegacySceneShapeUtil } from './feedback';
 import { recordInk } from './ink';
-import { showReadings, startLiveReading } from './readings';
 import { LassoOverlayUtil, LassoSelectTool } from './lasso';
 import { NotebookMeta, persistenceKey, updateNotebook } from './library';
 import { PAPERS, PageShapeUtil, Paper, addPage, getPageInView, installPages, setPaper } from './pages';
@@ -63,7 +62,7 @@ function TopBar({ nb }: { nb: NotebookMeta }) {
   const editor = useEditor();
   const [title, setTitle] = useState(nb.title);
   const page = useValue('page in view', () => getPageInView(editor), [editor]);
-  const readingsOn = useValue(showReadings);
+  const fileRef = useRef<HTMLInputElement>(null);
 
   return (
     <div className="topbar">
@@ -86,10 +85,15 @@ function TopBar({ nb }: { nb: NotebookMeta }) {
           {PAPERS.map((p) => <option key={p} value={p}>{p}</option>)}
         </select>
       )}
-      <button className={readingsOn ? 'on' : ''} onClick={() => showReadings.set(!readingsOn)}
-        title="Show what the board reads under each line">
-        Readings {readingsOn ? 'on' : 'off'}
-      </button>
+      {/* A screenshot or photo (a problem sheet, typed work) goes on the page selected, ready for Check my proof. */}
+      <button onClick={() => fileRef.current?.click()} title="Add a screenshot or photo to the page">Image</button>
+      <input ref={fileRef} type="file" accept="image/*" hidden onChange={async (e) => {
+        const files = [...(e.target.files ?? [])];
+        e.target.value = '';
+        if (!files.length) return;
+        await editor.putExternalContent({ type: 'files', files, point: editor.getViewportPageBounds().center });
+        editor.setCurrentTool('select');
+      }} />
       <button title="Tell us what worked or didn't" onClick={() => {
         const text = window.prompt('What worked, what didn\'t, what confused you?')?.trim();
         if (text) api.event('feedback', '', { text: text.slice(0, 3000) });
@@ -103,7 +107,6 @@ export function Notebook({ nb }: { nb: NotebookMeta }) {
     PageMenu: null, // one tldraw page; our paper pages are shapes
     Toolbar,
     TopPanel: () => <TopBar nb={nb} />,
-    OnTheCanvas: ReadingsOverlay,
     InFrontOfTheCanvas: CheckUI,
   }));
 
@@ -121,7 +124,6 @@ export function Notebook({ nb }: { nb: NotebookMeta }) {
           editor.setCurrentTool('draw');
           const stopPages = installPages(editor);
           const stopInk = recordInk(editor);
-          const stopReading = startLiveReading(editor);
           // Bump the library's "last edited" time, at most every few seconds.
           let last = 0;
           const stopListen = editor.store.listen(() => {
@@ -130,7 +132,7 @@ export function Notebook({ nb }: { nb: NotebookMeta }) {
             updateNotebook(nb.id, { updatedAt: last });
           }, { source: 'user', scope: 'document' });
           if (import.meta.env.DEV) (window as unknown as { editor: typeof editor }).editor = editor;
-          return () => { stopPages(); stopInk(); stopReading(); stopListen(); };
+          return () => { stopPages(); stopInk(); stopListen(); };
         }}
       />
     </div>

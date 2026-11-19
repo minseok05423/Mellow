@@ -3,13 +3,15 @@
 The runner (`leaneval.steps --agent-queue DIR`) uses the real pipeline unchanged; only the provider differs: each
 model call becomes DIR/<id>.request.json and waits for DIR/<id>.answer.json. An agent answers in a loop:
 
-    .venv/bin/python -m leaneval.agentq next DIR [prep|K/N]   # claims an unanswered request, prints it (or DONE)
+    .venv/bin/python -m leaneval.agentq next DIR [prep|K/N|TITLE]   # claims an unanswered request, prints it (or DONE)
     .venv/bin/python -m leaneval.agentq answer DIR ID FILE
 
 `next` claims what it prints (DIR/<id>.claimed), so several agents can share a queue. Lanes keep the graph check's
 judges isolated: `prep` takes every call but the judges' (the graph and forms calls, which see the whole proof), and
 K/N takes only judge calls whose `copy` is K mod N, so agents on 0/3, 1/3 and 2/3 answer one step's three identical
-judge requests independently, never having read the proof. A claimed request whose agent stopped is freed by deleting its .claimed file.
+judge requests independently, never having read the proof. TITLE takes only requests whose schema has that title
+(Chunks, Links, Graph, Form), so each call goes to an agent on the model it names (each request carries `model`), and
+the agent that links a graph never also revises it. A claimed request whose agent stopped is freed by deleting its .claimed file.
 
 Lean runs from all runners take turns (a file lock), so several queues can run at once without loading Mathlib in
 parallel. An agent is a stand-in for the API model, not the same thing: results are labelled with the queue's model
@@ -51,9 +53,11 @@ def claim(folder: Path, lane: str | None) -> tuple[dict, int] | None:
     todo = pending(folder)
     for p in todo:
         r = json.loads(p.read_text())
-        judge = r.get("schema", {}).get("title") == "Mark"
-        if lane == "prep" and judge or lane and lane != "prep" and (
-                not judge or r.get("copy", 0) % int(lane.split("/")[1]) != int(lane.split("/")[0])):
+        title = r.get("schema", {}).get("title")
+        judge = title == "Mark"
+        if lane == "prep" and judge or lane and "/" in lane and (
+                not judge or r.get("copy", 0) % int(lane.split("/")[1]) != int(lane.split("/")[0])) or (
+                lane and lane != "prep" and "/" not in lane and title != lane):
             continue
         try:
             (folder / p.name.replace(".request.", ".claimed.")).open("x").close()

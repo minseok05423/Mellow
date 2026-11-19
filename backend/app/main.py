@@ -53,8 +53,9 @@ def recognize_route(req: recognize.RecognizeRequest, x_mellow_user: str | None =
 
 
 def _llm_available():
-    if not config.llm_configured(config.CHECK_MODEL):
-        raise HTTPException(503, f"no key for the checking model ({config.CHECK_MODEL})")
+    for model in (config.CHUNK_MODEL, config.GRAPH_MODEL, config.CHECK_MODEL):
+        if not config.llm_configured(model):
+            raise HTTPException(503, f"no key for the checking model ({model})")
 
 
 class EventRequest(BaseModel):
@@ -101,6 +102,7 @@ class CheckRequest(BaseModel):
 class CheckResponse(BaseModel):
     nodes: list[graphcheck.NodeVerdict]
     complete: bool
+    reaches_goal: bool  # the structure gets to the goal, whatever the steps' verdicts
     message: str
     seconds: int
 
@@ -111,7 +113,8 @@ def check_route(req: CheckRequest, x_mellow_user: str | None = Header(None)):
     user = user_id(x_mellow_user)
     _llm_available()
     g = req.graph
-    if len(g.nodes) > 60 or len(g.variables) > 60 or any(len(n.text) > 500 for n in g.nodes) or len(g.goal) > 2000:
+    if (len(g.nodes) > 60 or len(g.blocks) > 60 or len(g.variables) > 60 or any(len(n.text) > 500 for n in g.nodes)
+            or len(g.goal) > 2000):
         raise HTTPException(413, "this proof is too long to check")
     if errs := graphcheck.graph_problems(g, None):
         raise HTTPException(400, "; ".join(errs))
